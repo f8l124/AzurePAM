@@ -1,0 +1,101 @@
+{
+  "_comment": "EntraChecks Default Configuration - Modify this file to customize assessment behavior",
+  "Version": "1.0.0",
+  "Assessment": {
+    "Scope": [
+      "Core",
+      "Compliance",
+      "IdentityProtection"
+    ],
+    "Mode": "Interactive",
+    "Tenant": {
+      "TenantId": "",
+      "TenantName": ""
+    },
+    "Output": {
+      "Directory": ".\\Output",
+      "Formats": [
+        "HTML",
+        "CSV",
+        "JSON"
+      ],
+      "IncludeTimestamp": true
+    },
+    "Exclusions": {
+      "Users": [],
+      "Groups": [],
+      "Checks": []
+    }
+  },
+  "Authentication": {
+    "Method": "Interactive",
+    "ServicePrincipal": {
+      "ClientId": "",
+      "CertificateThumbprint": "",
+      "KeyVaultName": "",
+      "SecretName": ""
+    },
+    "Scopes": [
+      "Directory.Read.All",
+      "Policy.Read.All",
+      "IdentityRiskyUser.Read.All",
+      "SecurityEvents.Read.All"
+    ]
+  },
+  "Logging": {
+    "Directory": ".\\Logs",
+    "MinimumLevel": "INFO",
+    "Targets": [
+      "File",
+      "Console"
+    ],
+    "StructuredLogging": true,
+    "RetentionDays": 90,
+    "MaxFileSizeMB": 100,
+    "BufferSize": 100
+  },
+  "ErrorHandling": {
+    "MaxRetries": 3,
+    "BaseDelaySeconds": 5,
+    "ExponentialBackoff": true,
+    "CircuitBreaker": {
+      "Enabled": true,
+      "FailureThreshold": 5,
+      "TimeoutSeconds": 60,
+      "HalfOpenRequests": 1
+    }
+  },
+  "Performance": {
+    "MaxConcurrentRequests": 10,
+    "RateLimitBuffer": 10,
+    "CacheDurationMinutes": 15,
+    "EnableCaching": false
+  },
+  "Notifications": {
+    "Email": {
+      "Enabled": false,
+      "SMTPServer": "smtp.office365.com",
+      "Port": 587,
+      "From": "entrachecks@contoso.com",
+      "To": [
+        "security-team@contoso.com"
+      ],
+      "UseSSL": true
+    },
+    "Teams": {
+      "Enabled": false,
+      "WebhookURL": ""
+    },
+    "Slack": {
+      "Enabled": false,
+      "WebhookURL": ""
+    }
+  },
+  "Compliance": {
+    "Frameworks": [
+      "CIS",
+      "NIST"
+    ],
+    "CustomBenchmarks": []
+  }
+}

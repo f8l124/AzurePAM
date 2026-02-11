@@ -1,0 +1,11 @@
+# EntraChecks output (don't commit assessment results)
+Output/
+Snapshots/
+
+# PowerShell logs
+*.log
+*.transcript
+
+# Temp files
+*.tmp
+~$*

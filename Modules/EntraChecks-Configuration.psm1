@@ -1,0 +1,1470 @@
+<#
+.SYNOPSIS
+    EntraChecks Configuration Management Module
+
+.DESCRIPTION
+    Provides centralized configuration management with schema validation,
+    environment-specific configurations, and secure credential handling.
+
+.NOTES
+    Version: 1.0.0
+    Author: SolveGRC Team
+    Requires: PowerShell 5.1 or higher
+#>
+
+#region ==================== MODULE INITIALIZATION ====================
+
+# Import logging module if available
+$loggingModulePath = Join-Path $PSScriptRoot "EntraChecks-Logging.psm1"
+if (Test-Path $loggingModulePath) {
+    Import-Module $loggingModulePath -Force -ErrorAction SilentlyContinue
+}
+
+# Configuration state
+$script:Config = $null
+$script:ConfigSchema = $null
+$script:ConfigLoaded = $false
+$script:ConfigFilePath = $null
+
+#endregion
+
+#region ==================== CONFIGURATION SCHEMA ====================
+
+<#
+.SYNOPSIS
+    Gets the default configuration schema for EntraChecks.
+
+.DESCRIPTION
+    Returns the JSON schema that defines the structure and validation rules
+    for EntraChecks configuration files.
+
+.EXAMPLE
+    $schema = Get-ConfigurationSchema
+#>
+function Get-ConfigurationSchema {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param()
+
+    return @{
+        '$schema' = "http://json-schema.org/draft-07/schema#"
+        'title' = "EntraChecks Configuration Schema"
+        'version' = "1.0.0"
+        'type' = "object"
+        'required' = @('Version', 'Assessment', 'Logging', 'ErrorHandling')
+        'properties' = @{
+            Version = @{
+                type = "string"
+                pattern = '^\d+\.\d+\.\d+$'
+                description = "Configuration schema version (semver format)"
+            }
+            Assessment = @{
+                type = "object"
+                required = @('Scope', 'Output')
+                properties = @{
+                    Scope = @{
+                        type = "array"
+                        items = @{
+                            type = "string"
+                            enum = @(
+                                "Core",
+                                "Compliance",
+                                "DefenderCompliance",
+                                "PurviewCompliance",
+                                "IdentityProtection",
+                                "SecureScore",
+                                "Devices",
+                                "Hybrid",
+                                "AzurePolicy",
+                                "DeltaReporting"
+                            )
+                        }
+                        minItems = 1
+                        uniqueItems = $true
+                        description = "Assessment modules to execute"
+                    }
+                    Mode = @{
+                        type = "string"
+                        enum = @("Interactive", "Scheduled", "CI/CD")
+                        default = "Interactive"
+                        description = "Execution mode"
+                    }
+                    Tenant = @{
+                        type = "object"
+                        properties = @{
+                            TenantId = @{
+                                type = "string"
+                                pattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                                description = "Azure AD Tenant ID (GUID)"
+                            }
+                            TenantName = @{
+                                type = "string"
+                                description = "Tenant display name"
+                            }
+                        }
+                    }
+                    Output = @{
+                        type = "object"
+                        required = @('Directory', 'Formats')
+                        properties = @{
+                            Directory = @{
+                                type = "string"
+                                description = "Output directory path"
+                            }
+                            Formats = @{
+                                type = "array"
+                                items = @{
+                                    type = "string"
+                                    enum = @("HTML", "CSV", "JSON", "XML")
+                                }
+                                minItems = 1
+                                uniqueItems = $true
+                                description = "Report output formats"
+                            }
+                            IncludeTimestamp = @{
+                                type = "boolean"
+                                default = $true
+                                description = "Include timestamp in output filenames"
+                            }
+                        }
+                    }
+                    Exclusions = @{
+                        type = "object"
+                        properties = @{
+                            Users = @{
+                                type = "array"
+                                items = @{ type = "string" }
+                                description = "User UPNs to exclude from checks"
+                            }
+                            Groups = @{
+                                type = "array"
+                                items = @{ type = "string" }
+                                description = "Group names to exclude from checks"
+                            }
+                            Checks = @{
+                                type = "array"
+                                items = @{ type = "string" }
+                                description = "Specific checks to skip"
+                            }
+                        }
+                    }
+                }
+            }
+            Authentication = @{
+                type = "object"
+                properties = @{
+                    Method = @{
+                        type = "string"
+                        enum = @("Interactive", "DeviceCode", "ServicePrincipal", "ManagedIdentity", "Certificate")
+                        default = "Interactive"
+                        description = "Authentication method"
+                    }
+                    ServicePrincipal = @{
+                        type = "object"
+                        properties = @{
+                            ClientId = @{
+                                type = "string"
+                                pattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                                description = "Service Principal Client ID"
+                            }
+                            CertificateThumbprint = @{
+                                type = "string"
+                                pattern = '^[0-9a-fA-F]{40}$'
+                                description = "Certificate thumbprint (SHA1)"
+                            }
+                            KeyVaultName = @{
+                                type = "string"
+                                description = "Azure Key Vault name for secret storage"
+                            }
+                            SecretName = @{
+                                type = "string"
+                                description = "Secret name in Key Vault"
+                            }
+                        }
+                    }
+                    Scopes = @{
+                        type = "array"
+                        items = @{ type = "string" }
+                        default = @(
+                            "Directory.Read.All",
+                            "Policy.Read.All",
+                            "IdentityRiskyUser.Read.All",
+                            "SecurityEvents.Read.All"
+                        )
+                        description = "Microsoft Graph API scopes"
+                    }
+                }
+            }
+            Logging = @{
+                type = "object"
+                required = @('Directory', 'MinimumLevel')
+                properties = @{
+                    Directory = @{
+                        type = "string"
+                        description = "Log files directory"
+                    }
+                    MinimumLevel = @{
+                        type = "string"
+                        enum = @("DEBUG", "INFO", "WARN", "ERROR", "CRITICAL")
+                        default = "INFO"
+                        description = "Minimum log level"
+                    }
+                    Targets = @{
+                        type = "array"
+                        items = @{
+                            type = "string"
+                            enum = @("File", "Console", "EventLog")
+                        }
+                        default = @("File", "Console")
+                        uniqueItems = $true
+                        description = "Log output targets"
+                    }
+                    StructuredLogging = @{
+                        type = "boolean"
+                        default = $true
+                        description = "Enable JSON structured logging"
+                    }
+                    RetentionDays = @{
+                        type = "integer"
+                        minimum = 1
+                        maximum = 3650
+                        default = 90
+                        description = "Log retention period in days"
+                    }
+                    MaxFileSizeMB = @{
+                        type = "integer"
+                        minimum = 1
+                        maximum = 1000
+                        default = 100
+                        description = "Maximum log file size in MB"
+                    }
+                    BufferSize = @{
+                        type = "integer"
+                        minimum = 1
+                        maximum = 1000
+                        default = 100
+                        description = "Log buffer size (entries)"
+                    }
+                }
+            }
+            ErrorHandling = @{
+                type = "object"
+                properties = @{
+                    MaxRetries = @{
+                        type = "integer"
+                        minimum = 0
+                        maximum = 10
+                        default = 3
+                        description = "Maximum retry attempts"
+                    }
+                    BaseDelaySeconds = @{
+                        type = "integer"
+                        minimum = 1
+                        maximum = 60
+                        default = 5
+                        description = "Base delay between retries (seconds)"
+                    }
+                    ExponentialBackoff = @{
+                        type = "boolean"
+                        default = $true
+                        description = "Enable exponential backoff"
+                    }
+                    CircuitBreaker = @{
+                        type = "object"
+                        properties = @{
+                            Enabled = @{
+                                type = "boolean"
+                                default = $true
+                                description = "Enable circuit breaker"
+                            }
+                            FailureThreshold = @{
+                                type = "integer"
+                                minimum = 1
+                                maximum = 20
+                                default = 5
+                                description = "Failures before opening circuit"
+                            }
+                            TimeoutSeconds = @{
+                                type = "integer"
+                                minimum = 10
+                                maximum = 600
+                                default = 60
+                                description = "Circuit breaker timeout (seconds)"
+                            }
+                            HalfOpenRequests = @{
+                                type = "integer"
+                                minimum = 1
+                                maximum = 10
+                                default = 1
+                                description = "Test requests in half-open state"
+                            }
+                        }
+                    }
+                }
+            }
+            KeyVault = @{
+                type = "object"
+                properties = @{
+                    Enabled = @{
+                        type = "boolean"
+                        default = $false
+                        description = "Enable Azure Key Vault integration (optional)"
+                    }
+                    VaultName = @{
+                        type = "string"
+                        description = "Azure Key Vault name"
+                    }
+                    AuthenticationMethod = @{
+                        type = "string"
+                        enum = @("ManagedIdentity", "ServicePrincipal", "Interactive")
+                        default = "ManagedIdentity"
+                        description = "Key Vault authentication method"
+                    }
+                    TenantId = @{
+                        type = "string"
+                        pattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                        description = "Tenant ID (required for ServicePrincipal/Interactive)"
+                    }
+                    ClientId = @{
+                        type = "string"
+                        pattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                        description = "Service Principal Client ID (for ServicePrincipal auth)"
+                    }
+                    CertificateThumbprint = @{
+                        type = "string"
+                        pattern = '^[0-9a-fA-F]{40}$'
+                        description = "Certificate thumbprint (for ServicePrincipal with cert)"
+                    }
+                    Secrets = @{
+                        type = "object"
+                        description = "Mapping of secret purposes to Key Vault secret names"
+                        properties = @{
+                            GraphAPISecret = @{
+                                type = "string"
+                                description = "Secret name for Graph API credentials"
+                            }
+                            ServicePrincipalSecret = @{
+                                type = "string"
+                                description = "Secret name for Service Principal secret"
+                            }
+                        }
+                    }
+                }
+            }
+            Performance = @{
+                type = "object"
+                properties = @{
+                    MaxConcurrentRequests = @{
+                        type = "integer"
+                        minimum = 1
+                        maximum = 50
+                        default = 10
+                        description = "Maximum concurrent API requests"
+                    }
+                    RateLimitBuffer = @{
+                        type = "integer"
+                        minimum = 0
+                        maximum = 50
+                        default = 10
+                        description = "Percentage buffer for rate limits"
+                    }
+                    CacheDurationMinutes = @{
+                        type = "integer"
+                        minimum = 0
+                        maximum = 1440
+                        default = 15
+                        description = "Cache duration for API responses (minutes)"
+                    }
+                    EnableCaching = @{
+                        type = "boolean"
+                        default = $false
+                        description = "Enable response caching"
+                    }
+                }
+            }
+            Notifications = @{
+                type = "object"
+                properties = @{
+                    Email = @{
+                        type = "object"
+                        properties = @{
+                            Enabled = @{
+                                type = "boolean"
+                                default = $false
+                            }
+                            SMTPServer = @{ type = "string" }
+                            Port = @{
+                                type = "integer"
+                                minimum = 1
+                                maximum = 65535
+                                default = 587
+                            }
+                            From = @{ type = "string"; format = "email" }
+                            To = @{
+                                type = "array"
+                                items = @{ type = "string"; format = "email" }
+                            }
+                            UseSSL = @{
+                                type = "boolean"
+                                default = $true
+                            }
+                        }
+                    }
+                    Teams = @{
+                        type = "object"
+                        properties = @{
+                            Enabled = @{
+                                type = "boolean"
+                                default = $false
+                            }
+                            WebhookURL = @{ type = "string"; format = "uri" }
+                        }
+                    }
+                    Slack = @{
+                        type = "object"
+                        properties = @{
+                            Enabled = @{
+                                type = "boolean"
+                                default = $false
+                            }
+                            WebhookURL = @{ type = "string"; format = "uri" }
+                        }
+                    }
+                }
+            }
+            Compliance = @{
+                type = "object"
+                properties = @{
+                    Frameworks = @{
+                        type = "array"
+                        items = @{
+                            type = "string"
+                            enum = @("NIST", "CIS", "ISO27001", "SOC2", "PCI-DSS", "HIPAA", "GDPR")
+                        }
+                        uniqueItems = $true
+                        description = "Compliance frameworks to assess against"
+                    }
+                    CustomBenchmarks = @{
+                        type = "array"
+                        items = @{
+                            type = "object"
+                            properties = @{
+                                Name = @{ type = "string" }
+                                FilePath = @{ type = "string" }
+                            }
+                        }
+                        description = "Custom benchmark definitions"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#endregion
+
+#region ==================== CONFIGURATION VALIDATION ====================
+
+<#
+.SYNOPSIS
+    Validates a configuration object against the schema.
+
+.DESCRIPTION
+    Performs comprehensive validation of a configuration object to ensure
+    it meets all schema requirements and business rules.
+
+.PARAMETER ConfigObject
+    The configuration hashtable to validate.
+
+.PARAMETER Schema
+    Optional custom schema. If not provided, uses default schema.
+
+.OUTPUTS
+    PSCustomObject with IsValid, Errors, and Warnings properties.
+
+.EXAMPLE
+    $result = Test-Configuration -ConfigObject $config
+    if (-not $result.IsValid) {
+        $result.Errors | ForEach-Object { Write-Error $_ }
+    }
+#>
+function Test-Configuration {
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$ConfigObject,
+
+        [hashtable]$Schema
+    )
+
+    if (-not $Schema) {
+        $Schema = Get-ConfigurationSchema
+    }
+
+    $errors = @()
+    $warnings = @()
+
+    # Write log if available
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level DEBUG -Message "Validating configuration" -Category "Configuration"
+    }
+
+    # Validate version
+    if (-not $ConfigObject.ContainsKey('Version')) {
+        $errors += "Missing required field: Version"
+    } elseif ($ConfigObject.Version -notmatch '^\d+\.\d+\.\d+$') {
+        $errors += "Invalid Version format. Expected semver (e.g., 1.0.0)"
+    }
+
+    # Validate required sections
+    $requiredSections = $Schema.required
+    foreach ($section in $requiredSections) {
+        if (-not $ConfigObject.ContainsKey($section)) {
+            $errors += "Missing required section: $section"
+        }
+    }
+
+    # Validate Assessment section
+    if ($ConfigObject.Assessment) {
+        $assessment = $ConfigObject.Assessment
+
+        # Validate Scope
+        if (-not $assessment.Scope -or $assessment.Scope.Count -eq 0) {
+            $errors += "Assessment.Scope must contain at least one module"
+        } else {
+            $validScopes = $Schema.properties.Assessment.properties.Scope.items.enum
+            foreach ($scope in $assessment.Scope) {
+                if ($scope -notin $validScopes) {
+                    $errors += "Invalid scope '$scope'. Valid values: $($validScopes -join ', ')"
+                }
+            }
+        }
+
+        # Validate Mode
+        if ($assessment.Mode) {
+            $validModes = $Schema.properties.Assessment.properties.Mode.enum
+            if ($assessment.Mode -notin $validModes) {
+                $errors += "Invalid Mode '$($assessment.Mode)'. Valid values: $($validModes -join ', ')"
+            }
+        }
+
+        # Validate Tenant ID format
+        if ($assessment.Tenant -and $assessment.Tenant.TenantId) {
+            if ($assessment.Tenant.TenantId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+                $errors += "Invalid TenantId format. Expected GUID format"
+            }
+        }
+
+        # Validate Output
+        if (-not $assessment.Output) {
+            $errors += "Missing required section: Assessment.Output"
+        } else {
+            if (-not $assessment.Output.Directory) {
+                $errors += "Missing required field: Assessment.Output.Directory"
+            }
+            if (-not $assessment.Output.Formats -or $assessment.Output.Formats.Count -eq 0) {
+                $errors += "Assessment.Output.Formats must contain at least one format"
+            } else {
+                $validFormats = $Schema.properties.Assessment.properties.Output.properties.Formats.items.enum
+                foreach ($format in $assessment.Output.Formats) {
+                    if ($format -notin $validFormats) {
+                        $errors += "Invalid output format '$format'. Valid values: $($validFormats -join ', ')"
+                    }
+                }
+            }
+        }
+    }
+
+    # Validate Authentication section
+    if ($ConfigObject.Authentication) {
+        $auth = $ConfigObject.Authentication
+
+        if ($auth.Method) {
+            $validMethods = $Schema.properties.Authentication.properties.Method.enum
+            if ($auth.Method -notin $validMethods) {
+                $errors += "Invalid authentication method '$($auth.Method)'. Valid values: $($validMethods -join ', ')"
+            }
+
+            # Validate ServicePrincipal configuration
+            if ($auth.Method -eq "ServicePrincipal" -and $auth.ServicePrincipal) {
+                if (-not $auth.ServicePrincipal.ClientId) {
+                    $errors += "ServicePrincipal.ClientId is required when using ServicePrincipal authentication"
+                } elseif ($auth.ServicePrincipal.ClientId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+                    $errors += "Invalid ServicePrincipal.ClientId format. Expected GUID"
+                }
+
+                if ($auth.ServicePrincipal.CertificateThumbprint -and
+                    $auth.ServicePrincipal.CertificateThumbprint -notmatch '^[0-9a-fA-F]{40}$') {
+                    $errors += "Invalid CertificateThumbprint format. Expected 40-character hexadecimal"
+                }
+
+                if (-not $auth.ServicePrincipal.CertificateThumbprint -and
+                    -not $auth.ServicePrincipal.KeyVaultName) {
+                    $warnings += "ServicePrincipal authentication requires either CertificateThumbprint or KeyVaultName"
+                }
+            }
+        }
+    }
+
+    # Validate Logging section
+    if ($ConfigObject.Logging) {
+        $logging = $ConfigObject.Logging
+
+        if (-not $logging.Directory) {
+            $errors += "Missing required field: Logging.Directory"
+        }
+
+        if (-not $logging.MinimumLevel) {
+            $errors += "Missing required field: Logging.MinimumLevel"
+        } else {
+            $validLevels = $Schema.properties.Logging.properties.MinimumLevel.enum
+            if ($logging.MinimumLevel -notin $validLevels) {
+                $errors += "Invalid log level '$($logging.MinimumLevel)'. Valid values: $($validLevels -join ', ')"
+            }
+        }
+
+        if ($logging.Targets) {
+            $validTargets = $Schema.properties.Logging.properties.Targets.items.enum
+            foreach ($target in $logging.Targets) {
+                if ($target -notin $validTargets) {
+                    $errors += "Invalid log target '$target'. Valid values: $($validTargets -join ', ')"
+                }
+            }
+
+            if ('EventLog' -in $logging.Targets) {
+                $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+                if (-not $isAdmin) {
+                    $warnings += "EventLog target requires administrator privileges. It may fall back to File/Console"
+                }
+            }
+        }
+
+        # Validate numeric ranges
+        if ($logging.RetentionDays) {
+            if ($logging.RetentionDays -lt 1 -or $logging.RetentionDays -gt 3650) {
+                $errors += "RetentionDays must be between 1 and 3650"
+            }
+        }
+
+        if ($logging.MaxFileSizeMB) {
+            if ($logging.MaxFileSizeMB -lt 1 -or $logging.MaxFileSizeMB -gt 1000) {
+                $errors += "MaxFileSizeMB must be between 1 and 1000"
+            }
+        }
+    }
+
+    # Validate ErrorHandling section
+    if ($ConfigObject.ErrorHandling) {
+        $errorHandling = $ConfigObject.ErrorHandling
+
+        if ($errorHandling.MaxRetries -and ($errorHandling.MaxRetries -lt 0 -or $errorHandling.MaxRetries -gt 10)) {
+            $errors += "MaxRetries must be between 0 and 10"
+        }
+
+        if ($errorHandling.BaseDelaySeconds -and ($errorHandling.BaseDelaySeconds -lt 1 -or $errorHandling.BaseDelaySeconds -gt 60)) {
+            $errors += "BaseDelaySeconds must be between 1 and 60"
+        }
+
+        if ($errorHandling.CircuitBreaker) {
+            $cb = $errorHandling.CircuitBreaker
+
+            if ($cb.FailureThreshold -and ($cb.FailureThreshold -lt 1 -or $cb.FailureThreshold -gt 20)) {
+                $errors += "CircuitBreaker.FailureThreshold must be between 1 and 20"
+            }
+
+            if ($cb.TimeoutSeconds -and ($cb.TimeoutSeconds -lt 10 -or $cb.TimeoutSeconds -gt 600)) {
+                $errors += "CircuitBreaker.TimeoutSeconds must be between 10 and 600"
+            }
+        }
+    }
+
+    # Validate Performance section
+    if ($ConfigObject.Performance) {
+        $perf = $ConfigObject.Performance
+
+        if ($perf.MaxConcurrentRequests -and ($perf.MaxConcurrentRequests -lt 1 -or $perf.MaxConcurrentRequests -gt 50)) {
+            $errors += "MaxConcurrentRequests must be between 1 and 50"
+        }
+
+        if ($perf.RateLimitBuffer -and ($perf.RateLimitBuffer -lt 0 -or $perf.RateLimitBuffer -gt 50)) {
+            $errors += "RateLimitBuffer must be between 0 and 50"
+        }
+    }
+
+    # Validate Notifications section
+    if ($ConfigObject.Notifications) {
+        $notifications = $ConfigObject.Notifications
+
+        # Email validation
+        if ($notifications.Email -and $notifications.Email.Enabled) {
+            if (-not $notifications.Email.SMTPServer) {
+                $errors += "Email.SMTPServer is required when email notifications are enabled"
+            }
+            if (-not $notifications.Email.From) {
+                $errors += "Email.From is required when email notifications are enabled"
+            }
+            if (-not $notifications.Email.To -or $notifications.Email.To.Count -eq 0) {
+                $errors += "Email.To must contain at least one recipient when email notifications are enabled"
+            }
+        }
+
+        # Teams validation
+        if ($notifications.Teams -and $notifications.Teams.Enabled -and -not $notifications.Teams.WebhookURL) {
+            $errors += "Teams.WebhookURL is required when Teams notifications are enabled"
+        }
+
+        # Slack validation
+        if ($notifications.Slack -and $notifications.Slack.Enabled -and -not $notifications.Slack.WebhookURL) {
+            $errors += "Slack.WebhookURL is required when Slack notifications are enabled"
+        }
+    }
+
+    # Validate path accessibility
+    $pathsToCheck = @()
+    if ($ConfigObject.Assessment -and $ConfigObject.Assessment.Output -and $ConfigObject.Assessment.Output.Directory) {
+        $pathsToCheck += @{ Path = $ConfigObject.Assessment.Output.Directory; Name = "Assessment.Output.Directory" }
+    }
+    if ($ConfigObject.Logging -and $ConfigObject.Logging.Directory) {
+        $pathsToCheck += @{ Path = $ConfigObject.Logging.Directory; Name = "Logging.Directory" }
+    }
+
+    foreach ($pathCheck in $pathsToCheck) {
+        $path = $pathCheck.Path
+        $name = $pathCheck.Name
+
+        # Check if path is rooted (absolute)
+        if (-not [System.IO.Path]::IsPathRooted($path) -and -not $path.StartsWith('.')) {
+            $warnings += "$name uses a relative path: $path. Consider using absolute paths for clarity"
+        }
+
+        # Check if parent directory exists (create if possible)
+        try {
+            $parentDir = Split-Path -Parent $path
+            if ($parentDir -and -not (Test-Path $parentDir)) {
+                $warnings += "$name parent directory does not exist: $parentDir. It will be created on initialization"
+            }
+        }
+        catch {
+            $warnings += "Unable to validate path for ${name}: $path"
+        }
+    }
+
+    $isValid = ($errors.Count -eq 0)
+
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        if ($isValid) {
+            Write-Log -Level INFO -Message "Configuration validation passed" -Category "Configuration" -Properties @{
+                Warnings = $warnings.Count
+            }
+        } else {
+            Write-Log -Level ERROR -Message "Configuration validation failed" -Category "Configuration" -Properties @{
+                Errors = $errors.Count
+                Warnings = $warnings.Count
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        IsValid = $isValid
+        Errors = $errors
+        Warnings = $warnings
+        ValidatedAt = Get-Date
+    }
+}
+
+#endregion
+
+#region ==================== CONFIGURATION LOADING ====================
+
+<#
+.SYNOPSIS
+    Loads configuration from a JSON file.
+
+.DESCRIPTION
+    Reads and validates configuration from a JSON file. Supports environment
+    variable substitution and default value merging.
+
+.PARAMETER FilePath
+    Path to the configuration JSON file.
+
+.PARAMETER ValidateOnly
+    If specified, only validates the configuration without loading it.
+
+.PARAMETER Environment
+    Optional environment name (e.g., "dev", "staging", "prod") for
+    environment-specific configuration overrides.
+
+.OUTPUTS
+    Hashtable containing the loaded configuration.
+
+.EXAMPLE
+    $config = Import-Configuration -FilePath ".\config\entrachecks.config.json"
+
+.EXAMPLE
+    $config = Import-Configuration -FilePath ".\config.json" -Environment "prod"
+#>
+function Import-Configuration {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+
+        [switch]$ValidateOnly,
+
+        [string]$Environment
+    )
+
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Level INFO -Message "Loading configuration" -Category "Configuration" -Properties @{
+            FilePath = $FilePath
+            Environment = $Environment
+        }
+    }
+
+    # Check if file exists
+    if (-not (Test-Path $FilePath)) {
+        $errorMsg = "Configuration file not found: $FilePath"
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level ERROR -Message $errorMsg -Category "Configuration"
+        }
+        throw $errorMsg
+    }
+
+    # Read and parse JSON
+    try {
+        $jsonContent = Get-Content -Path $FilePath -Raw
+        $config = $jsonContent | ConvertFrom-Json -AsHashtable
+    }
+    catch {
+        $errorMsg = "Failed to parse configuration file: $_"
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level ERROR -Message $errorMsg -Category "Configuration" -ErrorRecord $_
+        }
+        throw $errorMsg
+    }
+
+    # Perform environment variable substitution
+    $config = Expand-ConfigurationVariables -ConfigObject $config
+
+    # Load environment-specific overrides if specified
+    if ($Environment) {
+        $envConfigPath = $FilePath -replace '\.json$', ".$Environment.json"
+        if (Test-Path $envConfigPath) {
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level INFO -Message "Loading environment-specific configuration" -Category "Configuration" -Properties @{
+                    Environment = $Environment
+                    FilePath = $envConfigPath
+                }
+            }
+
+            try {
+                $envJsonContent = Get-Content -Path $envConfigPath -Raw
+                $envConfig = $envJsonContent | ConvertFrom-Json -AsHashtable
+                $config = Merge-Configuration -BaseConfig $config -OverrideConfig $envConfig
+            }
+            catch {
+                if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                    Write-Log -Level WARN -Message "Failed to load environment configuration" -Category "Configuration" -ErrorRecord $_
+                }
+            }
+        }
+    }
+
+    # Merge with defaults
+    $config = Merge-ConfigurationDefaults -ConfigObject $config
+
+    # Validate configuration
+    $validation = Test-Configuration -ConfigObject $config
+
+    if (-not $validation.IsValid) {
+        $errorMsg = "Configuration validation failed:`n" + ($validation.Errors -join "`n")
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level ERROR -Message $errorMsg -Category "Configuration"
+        }
+        throw $errorMsg
+    }
+
+    # Log warnings
+    if ($validation.Warnings.Count -gt 0 -and (Get-Command Write-Log -ErrorAction SilentlyContinue)) {
+        foreach ($warning in $validation.Warnings) {
+            Write-Log -Level WARN -Message $warning -Category "Configuration"
+        }
+    }
+
+    if (-not $ValidateOnly) {
+        $script:Config = $config
+        $script:ConfigLoaded = $true
+        $script:ConfigFilePath = $FilePath
+
+        if (Get-Command Write-AuditLog -ErrorAction SilentlyContinue) {
+            Write-AuditLog -EventType "ConfigurationChanged" -Description "Configuration loaded successfully" -Details @{
+                FilePath = $FilePath
+                Environment = $Environment
+            } -Result "Success"
+        }
+    }
+
+    return $config
+}
+
+<#
+.SYNOPSIS
+    Expands environment variables in configuration values.
+
+.DESCRIPTION
+    Replaces placeholders like ${ENV:VAR_NAME} with environment variable values.
+
+.PARAMETER ConfigObject
+    Configuration hashtable to process.
+
+.OUTPUTS
+    Hashtable with expanded variables.
+
+.EXAMPLE
+    $config = Expand-ConfigurationVariables -ConfigObject $config
+#>
+function Expand-ConfigurationVariables {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$ConfigObject
+    )
+
+    $expanded = @{}
+
+    foreach ($key in $ConfigObject.Keys) {
+        $value = $ConfigObject[$key]
+
+        if ($value -is [hashtable]) {
+            # Recursively process nested hashtables
+            $expanded[$key] = Expand-ConfigurationVariables -ConfigObject $value
+        }
+        elseif ($value -is [array]) {
+            # Process arrays
+            $expanded[$key] = $value | ForEach-Object {
+                if ($_ -is [hashtable]) {
+                    Expand-ConfigurationVariables -ConfigObject $_
+                }
+                elseif ($_ -is [string]) {
+                    Expand-StringVariable -Value $_
+                }
+                else {
+                    $_
+                }
+            }
+        }
+        elseif ($value -is [string]) {
+            # Expand environment variables in strings
+            $expanded[$key] = Expand-StringVariable -Value $value
+        }
+        else {
+            $expanded[$key] = $value
+        }
+    }
+
+    return $expanded
+}
+
+<#
+.SYNOPSIS
+    Expands environment variables in a string value.
+
+.PARAMETER Value
+    String value to expand.
+
+.OUTPUTS
+    String with expanded variables.
+#>
+function Expand-StringVariable {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    # Pattern: ${ENV:VAR_NAME} or ${ENV:VAR_NAME:default_value}
+    $pattern = '\$\{ENV:([^:}]+)(?::([^}]+))?\}'
+
+    $expandedValue = [regex]::Replace($Value, $pattern, {
+        param($match)
+        $envVarName = $match.Groups[1].Value
+        $defaultValue = $match.Groups[2].Value
+
+        $envValue = [Environment]::GetEnvironmentVariable($envVarName)
+
+        if ($null -ne $envValue) {
+            return $envValue
+        }
+        elseif ($defaultValue) {
+            return $defaultValue
+        }
+        else {
+            # Keep placeholder if no value or default
+            return $match.Value
+        }
+    })
+
+    return $expandedValue
+}
+
+<#
+.SYNOPSIS
+    Merges two configuration hashtables.
+
+.DESCRIPTION
+    Recursively merges override configuration into base configuration.
+    Override values take precedence.
+
+.PARAMETER BaseConfig
+    Base configuration hashtable.
+
+.PARAMETER OverrideConfig
+    Override configuration hashtable.
+
+.OUTPUTS
+    Merged configuration hashtable.
+#>
+function Merge-Configuration {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$BaseConfig,
+
+        [Parameter(Mandatory)]
+        [hashtable]$OverrideConfig
+    )
+
+    $merged = $BaseConfig.Clone()
+
+    foreach ($key in $OverrideConfig.Keys) {
+        $overrideValue = $OverrideConfig[$key]
+
+        if ($merged.ContainsKey($key) -and $merged[$key] -is [hashtable] -and $overrideValue -is [hashtable]) {
+            # Recursively merge nested hashtables
+            $merged[$key] = Merge-Configuration -BaseConfig $merged[$key] -OverrideConfig $overrideValue
+        }
+        else {
+            # Override value
+            $merged[$key] = $overrideValue
+        }
+    }
+
+    return $merged
+}
+
+<#
+.SYNOPSIS
+    Merges default values into configuration.
+
+.DESCRIPTION
+    Adds default values for any missing configuration properties.
+
+.PARAMETER ConfigObject
+    Configuration hashtable to merge defaults into.
+
+.OUTPUTS
+    Configuration with defaults applied.
+#>
+function Merge-ConfigurationDefaults {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$ConfigObject
+    )
+
+    $schema = Get-ConfigurationSchema
+
+    # Apply defaults from schema
+    $withDefaults = Apply-SchemaDefaults -ConfigObject $ConfigObject -SchemaProperties $schema.properties
+
+    return $withDefaults
+}
+
+<#
+.SYNOPSIS
+    Applies default values from schema to configuration.
+
+.PARAMETER ConfigObject
+    Configuration object to apply defaults to.
+
+.PARAMETER SchemaProperties
+    Schema properties containing default values.
+
+.OUTPUTS
+    Configuration with defaults applied.
+#>
+function Apply-SchemaDefaults {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$ConfigObject,
+
+        [Parameter(Mandatory)]
+        [hashtable]$SchemaProperties
+    )
+
+    $result = $ConfigObject.Clone()
+
+    foreach ($key in $SchemaProperties.Keys) {
+        $schemaProp = $SchemaProperties[$key]
+
+        if ($schemaProp.ContainsKey('default') -and -not $result.ContainsKey($key)) {
+            # Apply default value
+            $result[$key] = $schemaProp.default
+        }
+        elseif ($result.ContainsKey($key) -and $result[$key] -is [hashtable] -and $schemaProp.type -eq 'object' -and $schemaProp.ContainsKey('properties')) {
+            # Recursively apply defaults to nested objects
+            $result[$key] = Apply-SchemaDefaults -ConfigObject $result[$key] -SchemaProperties $schemaProp.properties
+        }
+    }
+
+    return $result
+}
+
+#endregion
+
+#region ==================== CONFIGURATION ACCESS ====================
+
+<#
+.SYNOPSIS
+    Gets the currently loaded configuration.
+
+.DESCRIPTION
+    Returns the configuration that was loaded via Import-Configuration.
+
+.OUTPUTS
+    Hashtable containing the current configuration, or $null if not loaded.
+
+.EXAMPLE
+    $config = Get-Configuration
+    if ($config) {
+        Write-Host "Log level: $($config.Logging.MinimumLevel)"
+    }
+#>
+function Get-Configuration {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param()
+
+    if (-not $script:ConfigLoaded) {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level WARN -Message "Configuration not loaded" -Category "Configuration"
+        }
+        return $null
+    }
+
+    return $script:Config
+}
+
+<#
+.SYNOPSIS
+    Gets a specific configuration value by path.
+
+.DESCRIPTION
+    Retrieves a configuration value using dot notation path.
+
+.PARAMETER Path
+    Dot-separated path to the configuration value (e.g., "Logging.MinimumLevel").
+
+.PARAMETER DefaultValue
+    Optional default value to return if path not found.
+
+.OUTPUTS
+    The configuration value at the specified path, or default value if not found.
+
+.EXAMPLE
+    $logLevel = Get-ConfigValue -Path "Logging.MinimumLevel" -DefaultValue "INFO"
+
+.EXAMPLE
+    $scopes = Get-ConfigValue -Path "Assessment.Scope"
+#>
+function Get-ConfigValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [object]$DefaultValue = $null
+    )
+
+    if (-not $script:ConfigLoaded) {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level WARN -Message "Configuration not loaded, returning default value" -Category "Configuration" -Properties @{
+                Path = $Path
+            }
+        }
+        return $DefaultValue
+    }
+
+    $pathParts = $Path -split '\.'
+    $current = $script:Config
+
+    foreach ($part in $pathParts) {
+        if ($current -is [hashtable] -and $current.ContainsKey($part)) {
+            $current = $current[$part]
+        }
+        else {
+            if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+                Write-Log -Level DEBUG -Message "Configuration path not found, returning default" -Category "Configuration" -Properties @{
+                    Path = $Path
+                }
+            }
+            return $DefaultValue
+        }
+    }
+
+    return $current
+}
+
+<#
+.SYNOPSIS
+    Exports the current configuration to a JSON file.
+
+.DESCRIPTION
+    Saves the current configuration to a file with optional pretty printing.
+
+.PARAMETER FilePath
+    Path where configuration should be saved.
+
+.PARAMETER NoPrettyPrint
+    If specified, outputs compact JSON without formatting.
+
+.EXAMPLE
+    Export-Configuration -FilePath ".\config\backup.json"
+#>
+function Export-Configuration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+
+        [switch]$NoPrettyPrint
+    )
+
+    if (-not $script:ConfigLoaded) {
+        throw "No configuration loaded to export"
+    }
+
+    try {
+        $jsonDepth = 10
+        if ($NoPrettyPrint) {
+            $json = $script:Config | ConvertTo-Json -Depth $jsonDepth -Compress
+        }
+        else {
+            $json = $script:Config | ConvertTo-Json -Depth $jsonDepth
+        }
+
+        $json | Out-File -FilePath $FilePath -Encoding UTF8
+
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level INFO -Message "Configuration exported" -Category "Configuration" -Properties @{
+                FilePath = $FilePath
+            }
+        }
+
+        if (Get-Command Write-AuditLog -ErrorAction SilentlyContinue) {
+            Write-AuditLog -EventType "DataExported" -Description "Configuration exported to file" -Details @{
+                FilePath = $FilePath
+            } -Result "Success"
+        }
+    }
+    catch {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level ERROR -Message "Failed to export configuration" -Category "Configuration" -ErrorRecord $_
+        }
+        throw
+    }
+}
+
+#endregion
+
+#region ==================== TEMPLATE GENERATION ====================
+
+<#
+.SYNOPSIS
+    Creates a default configuration template file.
+
+.DESCRIPTION
+    Generates a starter configuration file with all schema properties
+    and default values.
+
+.PARAMETER FilePath
+    Path where template should be created.
+
+.PARAMETER IncludeComments
+    If specified, includes comments explaining each section.
+
+.PARAMETER Minimal
+    If specified, creates a minimal configuration with only required fields.
+
+.EXAMPLE
+    New-ConfigurationTemplate -FilePath ".\config\template.json" -IncludeComments
+
+.EXAMPLE
+    New-ConfigurationTemplate -FilePath ".\config\minimal.json" -Minimal
+#>
+function New-ConfigurationTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+
+        [switch]$IncludeComments,
+
+        [switch]$Minimal
+    )
+
+    if (Test-Path $FilePath) {
+        $response = Read-Host "File '$FilePath' already exists. Overwrite? (y/n)"
+        if ($response -ne 'y') {
+            Write-Host "Operation cancelled"
+            return
+        }
+    }
+
+    $template = @{
+        Version = "1.0.0"
+        Assessment = @{
+            Scope = @("Core")
+            Mode = "Interactive"
+            Tenant = @{
+                TenantId = ""
+                TenantName = ""
+            }
+            Output = @{
+                Directory = ".\Output"
+                Formats = @("HTML", "CSV")
+                IncludeTimestamp = $true
+            }
+        }
+        Authentication = @{
+            Method = "Interactive"
+            Scopes = @(
+                "Directory.Read.All",
+                "Policy.Read.All"
+            )
+        }
+        Logging = @{
+            Directory = ".\Logs"
+            MinimumLevel = "INFO"
+            Targets = @("File", "Console")
+            StructuredLogging = $true
+            RetentionDays = 90
+            MaxFileSizeMB = 100
+            BufferSize = 100
+        }
+        ErrorHandling = @{
+            MaxRetries = 3
+            BaseDelaySeconds = 5
+            ExponentialBackoff = $true
+            CircuitBreaker = @{
+                Enabled = $true
+                FailureThreshold = 5
+                TimeoutSeconds = 60
+                HalfOpenRequests = 1
+            }
+        }
+    }
+
+    if (-not $Minimal) {
+        $template.Assessment.Exclusions = @{
+            Users = @()
+            Groups = @()
+            Checks = @()
+        }
+
+        $template.Performance = @{
+            MaxConcurrentRequests = 10
+            RateLimitBuffer = 10
+            CacheDurationMinutes = 15
+            EnableCaching = $false
+        }
+
+        $template.Notifications = @{
+            Email = @{
+                Enabled = $false
+                SMTPServer = ""
+                Port = 587
+                From = ""
+                To = @()
+                UseSSL = $true
+            }
+            Teams = @{
+                Enabled = $false
+                WebhookURL = ""
+            }
+        }
+
+        $template.Compliance = @{
+            Frameworks = @("CIS")
+            CustomBenchmarks = @()
+        }
+    }
+
+    try {
+        $json = $template | ConvertTo-Json -Depth 10
+
+        if ($IncludeComments) {
+            # Add comments to JSON (as a header)
+            $comments = @"
+/*
+ * EntraChecks Configuration File
+ * Version: 1.0.0
+ *
+ * This configuration file controls all aspects of EntraChecks assessment execution.
+ *
+ * Environment Variables:
+ *   You can use environment variable substitution with the syntax: `${ENV:VAR_NAME}` or `${ENV:VAR_NAME:default_value}`
+ *
+ * Environment-Specific Overrides:
+ *   Create files like entrachecks.config.dev.json or entrachecks.config.prod.json
+ *   These will be merged with the base configuration when using -Environment parameter
+ *
+ * For full schema documentation, run: Get-ConfigurationSchema | ConvertTo-Json -Depth 10
+ */
+
+"@
+            $json = $comments + $json
+        }
+
+        $json | Out-File -FilePath $FilePath -Encoding UTF8
+
+        Write-Host "Configuration template created: $FilePath" -ForegroundColor Green
+
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level INFO -Message "Configuration template created" -Category "Configuration" -Properties @{
+                FilePath = $FilePath
+                Minimal = $Minimal.IsPresent
+            }
+        }
+    }
+    catch {
+        Write-Error "Failed to create configuration template: $_"
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level ERROR -Message "Failed to create configuration template" -Category "Configuration" -ErrorRecord $_
+        }
+    }
+}
+
+#endregion
+
+#region ==================== MODULE EXPORTS ====================
+
+Export-ModuleMember -Function @(
+    'Get-ConfigurationSchema',
+    'Test-Configuration',
+    'Import-Configuration',
+    'Get-Configuration',
+    'Get-ConfigValue',
+    'Export-Configuration',
+    'New-ConfigurationTemplate'
+)
+
+#endregion

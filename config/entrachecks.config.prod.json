@@ -1,0 +1,96 @@
+{
+  "_comment": "Production Environment Overrides - This file is merged with the base configuration",
+  "Version": "1.0.0",
+  "Assessment": {
+    "Scope": [
+      "Core",
+      "Compliance",
+      "DefenderCompliance",
+      "PurviewCompliance",
+      "IdentityProtection",
+      "SecureScore",
+      "Devices",
+      "Hybrid"
+    ],
+    "Mode": "Scheduled",
+    "Output": {
+      "Directory": "C:\\EntraChecks\\Output",
+      "Formats": [
+        "HTML",
+        "CSV",
+        "JSON"
+      ]
+    }
+  },
+  "Authentication": {
+    "Method": "ServicePrincipal",
+    "ServicePrincipal": {
+      "ClientId": "${ENV:ENTRACHECKS_CLIENT_ID}",
+      "CertificateThumbprint": "${ENV:ENTRACHECKS_CERT_THUMBPRINT}",
+      "KeyVaultName": "${ENV:ENTRACHECKS_KEYVAULT}",
+      "SecretName": "entrachecks-client-secret"
+    }
+  },
+  "KeyVault": {
+    "Enabled": true,
+    "VaultName": "${ENV:ENTRACHECKS_KEYVAULT:mykeyvault}",
+    "AuthenticationMethod": "ManagedIdentity",
+    "Secrets": {
+      "GraphAPISecret": "entrachecks-graph-secret",
+      "ServicePrincipalSecret": "entrachecks-client-secret"
+    }
+  },
+  "Logging": {
+    "Directory": "C:\\EntraChecks\\Logs",
+    "MinimumLevel": "INFO",
+    "Targets": [
+      "File",
+      "EventLog"
+    ],
+    "StructuredLogging": true,
+    "RetentionDays": 180,
+    "MaxFileSizeMB": 200,
+    "BufferSize": 200
+  },
+  "ErrorHandling": {
+    "MaxRetries": 5,
+    "BaseDelaySeconds": 10,
+    "ExponentialBackoff": true,
+    "CircuitBreaker": {
+      "Enabled": true,
+      "FailureThreshold": 10,
+      "TimeoutSeconds": 120,
+      "HalfOpenRequests": 2
+    }
+  },
+  "Performance": {
+    "MaxConcurrentRequests": 20,
+    "RateLimitBuffer": 15,
+    "EnableCaching": true,
+    "CacheDurationMinutes": 30
+  },
+  "Notifications": {
+    "Email": {
+      "Enabled": true,
+      "SMTPServer": "${ENV:SMTP_SERVER:smtp.office365.com}",
+      "Port": 587,
+      "From": "${ENV:ENTRACHECKS_EMAIL_FROM}",
+      "To": [
+        "${ENV:ENTRACHECKS_EMAIL_TO}"
+      ],
+      "UseSSL": true
+    },
+    "Teams": {
+      "Enabled": true,
+      "WebhookURL": "${ENV:TEAMS_WEBHOOK_URL}"
+    }
+  },
+  "Compliance": {
+    "Frameworks": [
+      "CIS",
+      "NIST",
+      "ISO27001",
+      "SOC2"
+    ]
+  }
+}

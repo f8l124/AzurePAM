@@ -1,0 +1,71 @@
+name: Code Quality Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: PSScriptAnalyzer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Code Quality Check
+        shell: pwsh
+        run: |
+          Write-Host "Running PSScriptAnalyzer code quality check..." -ForegroundColor Cyan
+          .\Invoke-CodeQualityCheck.ps1 -FailOnErrors -ExportResults
+
+      - name: Upload Code Quality Reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-quality-reports
+          path: CodeQualityReports/
+          retention-days: 30
+
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'CodeQualityReports';
+
+            // Find the latest JSON report
+            const files = fs.readdirSync(reportPath);
+            const jsonFile = files.find(f => f.endsWith('.json'));
+
+            if (jsonFile) {
+              const report = JSON.parse(fs.readFileSync(`${reportPath}/${jsonFile}`, 'utf8'));
+
+              const summary = report.Summary;
+              const status = summary.Errors === 0 ? '✅ PASS' : '❌ FAIL';
+
+              const body = `## Code Quality Check ${status}
+
+**Summary:**
+- Files Analyzed: ${summary.FilesAnalyzed}
+- Files with Issues: ${summary.FilesWithIssues}
+- **Errors:** ${summary.Errors} 🔴
+- **Warnings:** ${summary.Warnings} ⚠️
+- **Total Issues:** ${summary.TotalIssues}
+
+${summary.Errors > 0 ? '⚠️ **This PR introduces code quality errors that must be fixed before merging.**' : ''}
+
+[View detailed report in artifacts](https://github.com/${{github.repository}}/actions/runs/${{github.run_id}})
+`;
+
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.name,
+                body: body
+              });
+            }

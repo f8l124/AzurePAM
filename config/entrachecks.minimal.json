@@ -1,0 +1,22 @@
+{
+  "_comment": "Minimal EntraChecks Configuration - Contains only required fields with defaults",
+  "Version": "1.0.0",
+  "Assessment": {
+    "Scope": [
+      "Core"
+    ],
+    "Output": {
+      "Directory": ".\\Output",
+      "Formats": [
+        "HTML"
+      ]
+    }
+  },
+  "Logging": {
+    "Directory": ".\\Logs",
+    "MinimumLevel": "INFO"
+  },
+  "ErrorHandling": {
+    "MaxRetries": 3
+  }
+}

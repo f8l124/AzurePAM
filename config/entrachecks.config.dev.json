@@ -1,0 +1,27 @@
+{
+  "_comment": "Development Environment Overrides - This file is merged with the base configuration",
+  "Version": "1.0.0",
+  "Assessment": {
+    "Scope": [
+      "Core"
+    ],
+    "Mode": "Interactive",
+    "Output": {
+      "Directory": ".\\Output\\Dev"
+    }
+  },
+  "Logging": {
+    "Directory": ".\\Logs\\Dev",
+    "MinimumLevel": "DEBUG",
+    "RetentionDays": 30
+  },
+  "ErrorHandling": {
+    "MaxRetries": 1,
+    "BaseDelaySeconds": 2
+  },
+  "Performance": {
+    "MaxConcurrentRequests": 5,
+    "EnableCaching": true,
+    "CacheDurationMinutes": 5
+  }
+}
