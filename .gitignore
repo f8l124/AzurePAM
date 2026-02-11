@@ -1,6 +1,8 @@
 # EntraChecks output (don't commit assessment results)
 Output/
 Snapshots/
+.claude/*
+
 
 # PowerShell logs
 *.log

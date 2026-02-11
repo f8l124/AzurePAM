@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(pwsh:*)",
-      "Bash(powershell:*)",
-      "Bash(powershell.exe:*)"
-    ]
-  }
-}
