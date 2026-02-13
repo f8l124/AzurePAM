@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Run Code Quality Check
         shell: pwsh
@@ -24,7 +24,7 @@ jobs:
 
       - name: Upload Code Quality Reports
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: code-quality-reports
           path: CodeQualityReports/
@@ -32,7 +32,7 @@ jobs:
 
       - name: Comment PR with Results
         if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         env:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
