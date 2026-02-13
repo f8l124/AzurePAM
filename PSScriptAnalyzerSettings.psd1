@@ -18,7 +18,11 @@
         'PSAvoidUsingCmdletAliases',
 
         # Some functions are intentionally verbose for clarity
-        'PSUseShouldProcessForStateChangingFunctions'
+        'PSUseShouldProcessForStateChangingFunctions',
+
+        # Plural nouns are natural for functions that operate on collections
+        # (e.g., Test-RiskyUsers, Get-ComplianceSnapshots, Compare-SecureScoreWithFindings)
+        'PSUseSingularNouns'
     )
 
     # Rules to explicitly include
@@ -29,7 +33,7 @@
         'PSAvoidUsingInvokeExpression',
         'PSAvoidGlobalVars',
         'PSUseDeclaredVarsMoreThanAssignments',
-        'PSAvoidUsingPositionalParameters',
+        # PSAvoidUsingPositionalParameters - disabled: too pedantic for Write-Host/Join-Path
 
         # Cmdlet Design
         'PSUseApprovedVerbs',
@@ -52,7 +56,7 @@
         'PSUseConsistentIndentation',
         'PSUseConsistentWhitespace',
         'PSAlignAssignmentStatement',
-        'PSUseCorrectCasing',
+        # PSUseCorrectCasing - disabled: false positives on -eq/-ne operators
 
         # Performance
         'PSAvoidUsingEmptyCatchBlock',
@@ -76,22 +80,22 @@
             CheckOpenBrace = $true
             CheckOpenParen = $true
             CheckOperator = $true
-            CheckPipe = $true
+            CheckPipe = $false  # Disabled: false positives on regex pipes in strings
             CheckPipeForRedundantWhitespace = $false
             CheckSeparator = $true
             CheckParameter = $false
         }
 
-        # Alignment
+        # Alignment (CheckHashtable disabled - conflicts with PSUseConsistentWhitespace CheckOperator)
         PSAlignAssignmentStatement = @{
             Enable = $true
-            CheckHashtable = $true
+            CheckHashtable = $false
         }
 
-        # Correct casing for cmdlets
-        PSUseCorrectCasing = @{
-            Enable = $true
-        }
+        # PSUseCorrectCasing disabled - false positives on comparison operators
+        # PSUseCorrectCasing = @{
+        #     Enable = $true
+        # }
 
         # Provide comment-based help
         PSProvideCommentHelp = @{
@@ -99,7 +103,7 @@
             ExportedOnly = $true
             BlockComment = $true
             VSCodeSnippetCorrection = $true
-            Placement = 'before'
+            Placement = 'begin'
         }
 
         # Use compatible cmdlets for cross-platform

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Install-Prerequisites.ps1
     Installs all PowerShell modules required by EntraChecks.
@@ -22,7 +22,7 @@
 
 .NOTES
     Version: 1.0.1
-    Author:  SolveGRC Team
+    Author:  David Stells
 #>
 
 [CmdletBinding()]

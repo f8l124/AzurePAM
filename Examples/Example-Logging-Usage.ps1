@@ -57,20 +57,20 @@ Write-AuditLog -EventType "AuthenticationSuccess" `
 Write-AuditLog -EventType "ConfigurationChanged" `
     -Description "Log level changed to DEBUG" `
     -Details @{
-        OldValue = "INFO"
-        NewValue = "DEBUG"
-        ChangedBy = $env:USERNAME
-    } `
+    OldValue = "INFO"
+    NewValue = "DEBUG"
+    ChangedBy = $env:USERNAME
+} `
     -Result "Success"
 
 Write-AuditLog -EventType "FindingDetected" `
     -Description "Insecure configuration detected" `
     -TargetObject "Conditional Access Policy" `
     -Details @{
-        PolicyName = "Block Legacy Auth"
-        Issue = "Policy is disabled"
-        Severity = "High"
-    } `
+    PolicyName = "Block Legacy Auth"
+    Issue = "Policy is disabled"
+    Severity = "High"
+} `
     -Result "Warning"
 
 #endregion

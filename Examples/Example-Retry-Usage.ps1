@@ -79,9 +79,9 @@ try {
     $result = Invoke-WithRetry -ScriptBlock {
         Test-RateLimitedAPI
     } -Operation "Rate Limited API" `
-      -MaxRetries 5 `
-      -ExponentialBackoff `
-      -BaseDelaySeconds 2
+        -MaxRetries 5 `
+        -ExponentialBackoff `
+        -BaseDelaySeconds 2
 
     Write-Host "API call succeeded on attempt $($result.CallNumber)" -ForegroundColor Green
 }
@@ -120,8 +120,8 @@ for ($i = 1; $i -le 8; $i++) {
         $result = Invoke-WithRetry -ScriptBlock {
             Test-FailingAPI
         } -Operation "Failing API Call $i" `
-          -MaxRetries 2 `
-          -CircuitBreakerName "TestAPI"
+            -MaxRetries 2 `
+            -CircuitBreakerName "TestAPI"
 
         Write-Host "Success: $result" -ForegroundColor Green
     }
@@ -202,8 +202,8 @@ try {
         $attemptCount++
         Test-CustomError -Attempt $attemptCount
     } -Operation "Custom Error Handler" `
-      -MaxRetries 5 `
-      -RetryableErrorPatterns @('Database.*pool.*exhausted', 'Connection pool')
+        -MaxRetries 5 `
+        -RetryableErrorPatterns @('Database.*pool.*exhausted', 'Connection pool')
 
     Write-Host $result -ForegroundColor Green
 }
@@ -295,9 +295,9 @@ function Get-UserDataWithRetry {
                 Department = "IT"
             }
         } -Operation "Get User Data" `
-          -MaxRetries 3 `
-          -ExponentialBackoff `
-          -CircuitBreakerName "UserAPI"
+            -MaxRetries 3 `
+            -ExponentialBackoff `
+            -CircuitBreakerName "UserAPI"
 
         Write-Log -Level INFO -Message "User data retrieved successfully" -Category "UserManagement" -Properties @{
             UserId = $UserId

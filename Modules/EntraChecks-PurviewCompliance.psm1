@@ -78,7 +78,12 @@ $script:ImprovementActionCategories = @{
 
 #region ==================== MODULE INITIALIZATION ====================
 
+<#
+.SYNOPSIS
+    Initializes the Purview Compliance Manager module and verifies Graph connection.
+#>
 function Initialize-PurviewComplianceModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -147,6 +152,7 @@ function Invoke-PurviewGraphRequest {
 }
 
 function ConvertTo-ComplianceStatus {
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [string]$Status
@@ -182,6 +188,7 @@ function ConvertTo-ComplianceStatus {
     Compliance Manager overview object.
 #>
 function Get-ComplianceManagerOverview {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -352,6 +359,7 @@ function Get-ComplianceManagerAssessments {
     Array of DLP policy objects.
 #>
 function Get-DLPPolicies {
+    [OutputType([object[]])]
     [CmdletBinding()]
     param()
     
@@ -360,11 +368,11 @@ function Get-DLPPolicies {
     try {
         # DLP policies via Security & Compliance
         $dlpUri = "https://graph.microsoft.com/v1.0/informationProtection/policy/labels"
-        $response = Invoke-PurviewGraphRequest -Uri $dlpUri
-        
+        $null = Invoke-PurviewGraphRequest -Uri $dlpUri
+
         # Also try the policies endpoint
         $policiesUri = "https://graph.microsoft.com/beta/security/informationProtection/sensitivityLabels"
-        $labelsResponse = Invoke-PurviewGraphRequest -Uri $policiesUri -ApiVersion "beta"
+        $null = Invoke-PurviewGraphRequest -Uri $policiesUri -ApiVersion "beta"
         
         $policies = @()
         
@@ -539,6 +547,7 @@ function Get-RetentionPolicies {
     Standardized compliance data object.
 #>
 function Get-PurviewComplianceAssessment {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [switch]$IncludeActions
@@ -606,11 +615,11 @@ function Get-PurviewComplianceAssessment {
                 ControlId = "CM-$($assessment.Id)"
                 ControlTitle = $assessment.Name
                 Status = if ($assessment.ScorePercent -ge 80) { "Passed" } 
-                        elseif ($assessment.ScorePercent -ge 50) { "Partial" } 
-                        else { "Failed" }
+                elseif ($assessment.ScorePercent -ge 50) { "Partial" } 
+                else { "Failed" }
                 Severity = if ($assessment.ScorePercent -lt 50) { "High" } 
-                          elseif ($assessment.ScorePercent -lt 80) { "Medium" } 
-                          else { "Info" }
+                elseif ($assessment.ScorePercent -lt 80) { "Medium" } 
+                else { "Info" }
                 Score = $assessment.Score
                 MaxScore = $assessment.MaxScore
                 CompliancePercent = $assessment.ScorePercent
@@ -742,6 +751,7 @@ function Get-PurviewComplianceAssessment {
     Name of the tenant/organization.
 #>
 function Export-PurviewComplianceReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -1005,8 +1015,8 @@ function Export-PurviewComplianceReport {
         
         foreach ($assessment in $PurviewData.ComplianceManager.Assessments) {
             $scoreClass = if ($assessment.ScorePercent -ge 80) { "badge-success" } 
-                         elseif ($assessment.ScorePercent -ge 50) { "badge-warning" } 
-                         else { "badge-danger" }
+            elseif ($assessment.ScorePercent -ge 50) { "badge-warning" } 
+            else { "badge-danger" }
             
             $html += @"
                         <tr>
@@ -1093,15 +1103,15 @@ function Export-PurviewComplianceReport {
     # Export CSV - Summary
     $csvSummaryPath = Join-Path $OutputDirectory "PurviewCompliance-Summary-$timestamp.csv"
     @([PSCustomObject]@{
-        Tenant = $TenantName
-        AssessmentDate = $PurviewData.AssessmentDate
-        ComplianceManagerAvailable = $PurviewData.Summary.ComplianceManagerAvailable
-        ComplianceScore = $PurviewData.Summary.ComplianceScore
-        TotalAssessments = $PurviewData.Summary.TotalAssessments
-        DLPPolicies = $PurviewData.Summary.DLPPoliciesCount
-        SensitivityLabels = $PurviewData.Summary.SensitivityLabelsCount
-        RetentionLabels = $PurviewData.Summary.RetentionPoliciesCount
-    }) | Export-Csv -Path $csvSummaryPath -NoTypeInformation -Encoding UTF8
+            Tenant = $TenantName
+            AssessmentDate = $PurviewData.AssessmentDate
+            ComplianceManagerAvailable = $PurviewData.Summary.ComplianceManagerAvailable
+            ComplianceScore = $PurviewData.Summary.ComplianceScore
+            TotalAssessments = $PurviewData.Summary.TotalAssessments
+            DLPPolicies = $PurviewData.Summary.DLPPoliciesCount
+            SensitivityLabels = $PurviewData.Summary.SensitivityLabelsCount
+            RetentionLabels = $PurviewData.Summary.RetentionPoliciesCount
+        }) | Export-Csv -Path $csvSummaryPath -NoTypeInformation -Encoding UTF8
     Write-Host "    [OK] Summary CSV: $csvSummaryPath" -ForegroundColor Green
     
     return @{
@@ -1138,4 +1148,4 @@ Export-ModuleMember -Variable @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-PurviewComplianceModule
+$null = Initialize-PurviewComplianceModule

@@ -1,4 +1,4 @@
-# List all exported functions from reporting modules
+﻿# List all exported functions from reporting modules
 Write-Host "Checking exported functions from each module..." -ForegroundColor Cyan
 Write-Host ""
 

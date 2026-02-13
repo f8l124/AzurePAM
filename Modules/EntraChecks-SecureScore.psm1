@@ -160,7 +160,12 @@ $script:SecureScoreCategories = @{
 
 #region ==================== MODULE INITIALIZATION ====================
 
+<#
+.SYNOPSIS
+    Initializes the Secure Score module and verifies Graph connection and required scopes.
+#>
 function Initialize-SecureScoreModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -175,8 +180,18 @@ function Initialize-SecureScoreModule {
         Write-Host "    [i] Connected as: $($context.Account)" -ForegroundColor Gray
         
         # Check for required scope
-        if ($context.Scopes -notcontains "SecurityEvents.Read.All") {
-            Write-Host "    [!] SecurityEvents.Read.All scope may be required" -ForegroundColor Yellow
+        $requiredScopes = @("SecurityEvents.Read.All")
+        $hasRequiredScope = $false
+        foreach ($scope in $requiredScopes) {
+            if ($context.Scopes -contains $scope) {
+                $hasRequiredScope = $true
+                Write-Host "    [i] Using scope: $scope" -ForegroundColor Gray
+                break
+            }
+        }
+
+        if (-not $hasRequiredScope) {
+            Write-Host "    [!] Required scope missing. Need SecurityEvents.Read.All" -ForegroundColor Yellow
         }
     }
     
@@ -236,6 +251,7 @@ function Invoke-SecureScoreGraphRequest {
     Required Permission: SecurityEvents.Read.All
 #>
 function Get-SecureScore {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [switch]$IncludeHistory
@@ -451,12 +467,15 @@ function Get-SecureScoreImprovementActions {
     # Create lookup for current control scores
     $currentScores = @{}
     foreach ($cs in $SecureScore.ControlScores) {
-        $currentScores[$cs.ControlName] = $cs
+        if ($cs.ControlName) {
+            $currentScores[$cs.ControlName] = $cs
+        }
     }
     
     $improvements = @()
     
     foreach ($profile in $ControlProfiles) {
+        if (-not $profile.ControlName) { continue }
         $currentControl = $currentScores[$profile.ControlName]
         
         # Calculate potential improvement
@@ -495,7 +514,7 @@ function Get-SecureScoreImprovementActions {
                     ($potentialImprovement * 10) +
                     $(if ($profile.ImplementationCost -eq "Low") { 3 } elseif ($profile.ImplementationCost -eq "Moderate") { 2 } elseif ($profile.ImplementationCost -eq "High") { 1 } else { 0 }) +
                     $(if ($profile.UserImpact -eq "Low") { 3 } elseif ($profile.UserImpact -eq "Moderate") { 2 } elseif ($profile.UserImpact -eq "High") { 1 } else { 0 })
-                , 2)
+                    , 2)
             }
         }
     }
@@ -537,14 +556,15 @@ function Get-SecureScoreImprovementActions {
     Comparison results with aligned and divergent findings.
 #>
 function Compare-SecureScoreWithFindings {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
         $SecureScore,
-        
+
         [Parameter()]
         $ControlProfiles,
-        
+
         [Parameter()]
         [array]$Findings = $script:Findings
     )
@@ -563,7 +583,9 @@ function Compare-SecureScoreWithFindings {
     # Create lookup for control scores
     $controlScoreLookup = @{}
     foreach ($cs in $SecureScore.ControlScores) {
-        $controlScoreLookup[$cs.ControlName] = $cs
+        if ($cs.ControlName) {
+            $controlScoreLookup[$cs.ControlName] = $cs
+        }
     }
     
     $comparison = @()
@@ -662,15 +684,15 @@ function Compare-SecureScoreWithFindings {
     }
     
     # Sort by alignment (divergent first, then needs work)
-    $comparison = $comparison | Sort-Object @{Expression={
-        switch ($_.Alignment) {
-            "Divergent" { 1 }
-            "Aligned - Needs Work" { 2 }
-            "No Data" { 3 }
-            "Aligned - Good" { 4 }
-            default { 5 }
-        }
-    }}
+    $comparison = $comparison | Sort-Object @{Expression = {
+            switch ($_.Alignment) {
+                "Divergent" { 1 }
+                "Aligned - Needs Work" { 2 }
+                "No Data" { 3 }
+                "Aligned - Good" { 4 }
+                default { 5 }
+            }
+        } }
     
     Write-Host "    [i] Aligned: $alignedCount | Divergent: $divergentCount | No mapping: $noMappingCount" -ForegroundColor $(
         if ($divergentCount -eq 0) { "Green" } elseif ($divergentCount -le 3) { "Yellow" } else { "Red" }
@@ -706,6 +728,7 @@ function Compare-SecureScoreWithFindings {
     EntraChecks findings array.
 #>
 function Export-SecureScoreReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -731,13 +754,14 @@ function Export-SecureScoreReport {
     # Gather data
     $secureScore = Get-SecureScore -IncludeHistory
     $controlProfiles = Get-SecureScoreControlProfiles
-    $improvements = Get-SecureScoreImprovementActions -SecureScore $secureScore -ControlProfiles $controlProfiles
-    $comparison = Compare-SecureScoreWithFindings -SecureScore $secureScore -ControlProfiles $controlProfiles -Findings $Findings
-    
+
     if (-not $secureScore) {
         Write-Host "`n[!] Unable to generate report - no Secure Score data" -ForegroundColor Red
         return $null
     }
+
+    $improvements = Get-SecureScoreImprovementActions -SecureScore $secureScore -ControlProfiles $controlProfiles
+    $comparison = Compare-SecureScoreWithFindings -SecureScore $secureScore -ControlProfiles $controlProfiles -Findings $Findings
     
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $assessmentDate = Get-Date -Format "MMMM dd, yyyy HH:mm"
@@ -1126,7 +1150,7 @@ function Export-SecureScoreReport {
         }
         if ($imp.ActionUrl) {
             $html += @"
-            <p style="margin-top: 10px;"><a href="$($imp.ActionUrl)" target="_blank">Take action in Microsoft 365 →</a></p>
+            <p style="margin-top: 10px;"><a href="$($imp.ActionUrl)" target="_blank">Take action in Microsoft 365 &#8594;</a></p>
 "@
         }
         $html += @"
@@ -1164,16 +1188,16 @@ function Export-SecureScoreReport {
     # Summary CSV
     $summaryCsvPath = Join-Path $OutputDirectory "SecureScore-Summary-$timestamp.csv"
     @([PSCustomObject]@{
-        Tenant = $TenantName
-        AssessmentDate = $assessmentDate
-        CurrentScore = $secureScore.CurrentScore
-        MaxScore = $secureScore.MaxScore
-        ScorePercent = $secureScore.ScorePercent
-        PotentialImprovement = ($improvements | Measure-Object -Property PotentialImprovement -Sum).Sum
-        ImprovementActionsCount = $improvements.Count
-        LicensedUsers = $secureScore.LicensedUserCount
-        ActiveUsers = $secureScore.ActiveUserCount
-    }) | Export-Csv -Path $summaryCsvPath -NoTypeInformation -Encoding UTF8
+            Tenant = $TenantName
+            AssessmentDate = $assessmentDate
+            CurrentScore = $secureScore.CurrentScore
+            MaxScore = $secureScore.MaxScore
+            ScorePercent = $secureScore.ScorePercent
+            PotentialImprovement = ($improvements | Measure-Object -Property PotentialImprovement -Sum).Sum
+            ImprovementActionsCount = $improvements.Count
+            LicensedUsers = $secureScore.LicensedUserCount
+            ActiveUsers = $secureScore.ActiveUserCount
+        }) | Export-Csv -Path $summaryCsvPath -NoTypeInformation -Encoding UTF8
     Write-Host "[OK] Summary CSV: $summaryCsvPath" -ForegroundColor Green
     
     return @{
@@ -1203,4 +1227,4 @@ Export-ModuleMember -Function @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-SecureScoreModule
+$null = Initialize-SecureScoreModule

@@ -1,4 +1,4 @@
-# Summary Report: Module Cleanup Results
+﻿# Summary Report: Module Cleanup Results
 Write-Host ""
 Write-Host "=" * 80 -ForegroundColor Cyan
 Write-Host "MODULE CLEANUP SUMMARY REPORT" -ForegroundColor Cyan
@@ -6,11 +6,11 @@ Write-Host "=" * 80 -ForegroundColor Cyan
 Write-Host ""
 
 $modules = @(
-    @{Name = 'EntraChecks-ComplianceMapping.psm1'; Before = 144},
-    @{Name = 'EntraChecks-RiskScoring.psm1'; Before = 69},
-    @{Name = 'EntraChecks-RemediationGuidance.psm1'; Before = 78},
-    @{Name = 'EntraChecks-HTMLReporting.psm1'; Before = 12},
-    @{Name = 'EntraChecks-ExcelReporting.psm1'; Before = 663}
+    @{Name = 'EntraChecks-ComplianceMapping.psm1'; Before = 144 },
+    @{Name = 'EntraChecks-RiskScoring.psm1'; Before = 69 },
+    @{Name = 'EntraChecks-RemediationGuidance.psm1'; Before = 78 },
+    @{Name = 'EntraChecks-HTMLReporting.psm1'; Before = 12 },
+    @{Name = 'EntraChecks-ExcelReporting.psm1'; Before = 663 }
 )
 
 $totalBefore = 0

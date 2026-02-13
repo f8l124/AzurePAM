@@ -170,6 +170,9 @@ function Connect-EntraChecks {
         [Parameter(ParameterSetName = "Interactive")]
         [switch]$Interactive,
 
+        [Parameter(ParameterSetName = "Interactive")]
+        [switch]$UseDeviceCode,
+
         [Parameter(Mandatory, ParameterSetName = "ClientSecret")]
         [Parameter(Mandatory, ParameterSetName = "Certificate")]
         [Parameter(Mandatory, ParameterSetName = "KeyVault")]
@@ -245,10 +248,18 @@ function Connect-EntraChecks {
         switch ($PSCmdlet.ParameterSetName) {
             "Interactive" {
                 Write-Host "`n[+] Starting interactive authentication..." -ForegroundColor Cyan
-                Write-Host "    A browser window will open for sign-in." -ForegroundColor Gray
-                Write-Host "    Sign in with a Global Admin or appropriately privileged account." -ForegroundColor Gray
 
-                Connect-MgGraph -Scopes $requiredScopes -NoWelcome -ErrorAction Stop
+                if ($UseDeviceCode) {
+                    Write-Host "    Using device code authentication." -ForegroundColor Gray
+                    Write-Host "    You will receive a code to enter at https://microsoft.com/devicelogin" -ForegroundColor Gray
+                    Connect-MgGraph -Scopes $requiredScopes -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
+                }
+                else {
+                    Write-Host "    A browser window will open for sign-in." -ForegroundColor Gray
+                    Write-Host "    Sign in with a Global Admin or appropriately privileged account." -ForegroundColor Gray
+                    Write-Host "    NOTE: If browser fails, try: Connect-EntraChecks -UseDeviceCode" -ForegroundColor Yellow
+                    Connect-MgGraph -Scopes $requiredScopes -NoWelcome -ErrorAction Stop
+                }
             }
 
             "ClientSecret" {

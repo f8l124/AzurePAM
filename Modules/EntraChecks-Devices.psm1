@@ -61,6 +61,7 @@ $script:CriticalStaleDeviceThresholdDays = 180
     Called automatically when module is imported.
 #>
 function Initialize-DevicesModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -137,21 +138,21 @@ function Add-ModuleFinding {
     }
     else {
         $finding = [PSCustomObject]@{
-            Time        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Status      = $Status
-            Object      = $Object
+            Time = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            Status = $Status
+            Object = $Object
             Description = $Description
             Remediation = $Remediation
-            Module      = $script:ModuleName
+            Module = $script:ModuleName
         }
         
         $script:Findings += $finding
         
         $color = switch ($Status) {
-            "OK"      { "Green" }
-            "INFO"    { "Cyan" }
+            "OK" { "Green" }
+            "INFO" { "Cyan" }
             "WARNING" { "Yellow" }
-            "FAIL"    { "Red" }
+            "FAIL" { "Red" }
         }
         Write-Host "[$Status] $Object" -ForegroundColor $color
     }
@@ -565,7 +566,6 @@ function Test-DeviceComplianceStatus {
         $compliant = $managedDevices | Where-Object { $_.complianceState -eq "compliant" }
         $nonCompliant = $managedDevices | Where-Object { $_.complianceState -eq "noncompliant" }
         $inGracePeriod = $managedDevices | Where-Object { $_.complianceState -eq "inGracePeriod" }
-        $configManager = $managedDevices | Where-Object { $_.complianceState -eq "configManager" }
         $unknown = $managedDevices | Where-Object { $_.complianceState -in @("unknown", "notEvaluated") }
         $conflict = $managedDevices | Where-Object { $_.complianceState -eq "conflict" }
         
@@ -576,8 +576,8 @@ function Test-DeviceComplianceStatus {
         
         # Summary finding with appropriate status
         $summaryStatus = if ($complianceRate -ge 95) { "OK" }
-                        elseif ($complianceRate -ge 80) { "WARNING" }
-                        else { "FAIL" }
+        elseif ($complianceRate -ge 80) { "WARNING" }
+        else { "FAIL" }
         
         Add-ModuleFinding -Status $summaryStatus `
             -Object "Device Compliance Summary" `
@@ -788,8 +788,8 @@ function Test-DeviceCompliancePolicies {
                 }
                 
                 $assignmentSummary = if ($assignedToAll) { "All users/devices" }
-                                     elseif ($assignedGroups.Count -gt 0) { "$($assignedGroups.Count) group(s)" }
-                                     else { "Not assigned" }
+                elseif ($assignedGroups.Count -gt 0) { "$($assignedGroups.Count) group(s)" }
+                else { "Not assigned" }
                 
                 if (-not $assignedToAll -and $assignedGroups.Count -eq 0) {
                     Add-ModuleFinding -Status "WARNING" `
@@ -1315,7 +1315,7 @@ function Test-ConditionalAccessDeviceControls {
         $allAppsDevicePolicy = $enabledPolicies | Where-Object {
             $_.conditions.applications.includeApplications -contains "All" -and
             ($_.grantControls.builtInControls -contains "compliantDevice" -or
-             $_.grantControls.builtInControls -contains "domainJoinedDevice")
+            $_.grantControls.builtInControls -contains "domainJoinedDevice")
         }
         
         if ($allAppsDevicePolicy.Count -gt 0) {
@@ -1333,8 +1333,8 @@ function Test-ConditionalAccessDeviceControls {
         
         # Check for mobile controls
         $enabledMobileControls = ($policiesRequiringApprovedApp + $policiesRequiringManagedApp) | 
-                                  Where-Object { $_.state -eq "enabled" } | 
-                                  Select-Object -Unique
+            Where-Object { $_.state -eq "enabled" } | 
+            Select-Object -Unique
         
         if ($enabledMobileControls.Count -gt 0) {
             Add-ModuleFinding -Status "OK" `
@@ -1413,4 +1413,4 @@ Export-ModuleMember -Function @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-DevicesModule
+$null = Initialize-DevicesModule

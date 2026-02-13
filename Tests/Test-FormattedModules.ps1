@@ -1,4 +1,4 @@
-# Test that all formatted modules still work correctly
+﻿# Test that all formatted modules still work correctly
 
 Write-Host "Testing formatted modules..." -ForegroundColor Cyan
 Write-Host ""

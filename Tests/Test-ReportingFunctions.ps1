@@ -1,4 +1,4 @@
-# Final Validation - Test Reporting Functions
+﻿# Final Validation - Test Reporting Functions
 Write-Host ""
 Write-Host "=" * 80 -ForegroundColor Cyan
 Write-Host "FINAL VALIDATION - REPORTING FUNCTIONS TEST" -ForegroundColor Cyan
@@ -88,7 +88,7 @@ try {
     Write-Host "  [OK] Risk Summary: $($riskSummary.AverageRiskScore) avg score" -ForegroundColor Green
 
     # Test Compliance Gap Report
-    $complianceGap = Get-ComplianceGapReport -Findings $findings -Framework 'All'
+    $null = Get-ComplianceGapReport -Findings $findings -Framework 'All'
     Write-Host "  [OK] Compliance Gap Report generated" -ForegroundColor Green
 
     # Test Prioritized Findings

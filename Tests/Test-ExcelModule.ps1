@@ -1,4 +1,4 @@
-# Test the cleaned Excel module
+﻿# Test the cleaned Excel module
 Write-Host "Testing cleaned Excel Reporting module..." -ForegroundColor Cyan
 Write-Host ""
 

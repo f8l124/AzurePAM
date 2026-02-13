@@ -22,7 +22,7 @@
 # Import dependent modules
 $modulePath = Split-Path -Parent $PSCommandPath
 Import-Module (Join-Path $modulePath "EntraChecks-ComplianceMapping.psm1") -Force
-Import-Module (Join-Path $modulePath "EntraChecks-RiskScoring.psm1") -Force
+Import-Module (Join-Path $modulePath "EntraChecks-RiskScoring.psm1") -Force -DisableNameChecking
 Import-Module (Join-Path $modulePath "EntraChecks-RemediationGuidance.psm1") -Force
 
 #region HTML Generation Functions
@@ -54,6 +54,7 @@ function New-EnhancedHTMLReport {
     .EXAMPLE
         New-EnhancedHTMLReport -Findings $findings -OutputPath "report.html" -TenantInfo $tenantInfo
     #>
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -66,6 +67,8 @@ function New-EnhancedHTMLReport {
         [object]$TenantInfo,
 
         [object]$PreviousAssessment,
+
+        [object]$DefenderCompliance,
 
         [string[]]$IncludeSections = @('All')
     )
@@ -80,6 +83,18 @@ function New-EnhancedHTMLReport {
         $enhancedFindings += $enhanced
     }
 
+    # Deduplicate findings by Description + Object to prevent repeated entries
+    $seen = @{}
+    $deduped = @()
+    foreach ($f in $enhancedFindings) {
+        $key = "$($f.Description)|$($f.Object)"
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $deduped += $f
+        }
+    }
+    $enhancedFindings = $deduped
+
     # Calculate summaries
     $riskSummary = Get-RiskSummary -Findings $enhancedFindings
     $complianceGap = Get-ComplianceGapReport -Findings $enhancedFindings -Framework 'All'
@@ -89,10 +104,10 @@ function New-EnhancedHTMLReport {
     # Generate HTML sections
     $htmlHead = Get-HTMLHead
     $htmlNav = Get-HTMLNavigation
-    $htmlExecutive = Get-ExecutiveDashboard -RiskSummary $riskSummary -ComplianceGap $complianceGap -TenantInfo $TenantInfo
+    $htmlExecutive = Get-ExecutiveDashboard -RiskSummary $riskSummary -ComplianceGap $complianceGap -TenantInfo $TenantInfo -DefenderCompliance $DefenderCompliance
     $htmlQuickWins = Get-QuickWinsSection -QuickWins $quickWins
     $htmlPriority = Get-PrioritySection -PrioritizedFindings $prioritized
-    $htmlCompliance = Get-ComplianceSection -Findings $enhancedFindings -ComplianceGap $complianceGap
+    $htmlCompliance = Get-ComplianceSection -Findings $enhancedFindings -ComplianceGap $complianceGap -DefenderCompliance $DefenderCompliance
     $htmlDetailed = Get-DetailedFindingsSection -Findings $enhancedFindings
     $htmlJavaScript = Get-HTMLJavaScript
 
@@ -110,7 +125,7 @@ function New-EnhancedHTMLReport {
     $htmlNav
     <div class="container">
         <header class="report-header">
-            <h1>🔒 Microsoft Entra ID Security Assessment</h1>
+            <h1>&#128274; Microsoft Entra ID Security Assessment</h1>
             <div class="tenant-info">
                 <p><strong>Tenant:</strong> $($TenantInfo.TenantName)</p>
                 <p><strong>Tenant ID:</strong> $($TenantInfo.TenantId)</p>
@@ -564,6 +579,284 @@ function Get-HTMLHead {
     .expand-all-btn:hover {
         background: #0053a6;
     }
+
+    /* Category Accordions */
+    .category-accordion {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        overflow: hidden;
+    }
+
+    .category-header {
+        padding: 16px 20px;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+        transition: background 0.2s;
+    }
+
+    .category-header:hover {
+        background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    }
+
+    .category-title {
+        font-weight: 700;
+        font-size: 1.15em;
+        color: #333;
+    }
+
+    .category-badges {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .category-badges .count-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        font-weight: 600;
+    }
+
+    .count-badge.fail-badge { background: #d13438; color: white; }
+    .count-badge.warning-badge { background: #ff8c00; color: white; }
+    .count-badge.ok-badge { background: #107c10; color: white; }
+    .count-badge.info-badge { background: #0078d4; color: white; }
+
+    .category-arrow {
+        font-size: 0.9em;
+        transition: transform 0.2s;
+        color: #666;
+    }
+
+    .category-arrow.open { transform: rotate(180deg); }
+
+    .category-body {
+        display: none;
+        padding: 0 16px 16px 16px;
+    }
+
+    .category-body.active {
+        display: block;
+    }
+
+    /* Status Sub-Accordions */
+    .status-accordion {
+        border: 1px solid #e8e8e8;
+        border-radius: 6px;
+        margin-top: 10px;
+        overflow: hidden;
+    }
+
+    .status-header {
+        padding: 12px 16px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+        transition: background 0.2s;
+    }
+
+    .status-header:hover { opacity: 0.9; }
+
+    .status-header.fail-header { background: #fde7e8; border-left: 4px solid #d13438; }
+    .status-header.warning-header { background: #fff4ce; border-left: 4px solid #ff8c00; }
+    .status-header.ok-header { background: #dff6dd; border-left: 4px solid #107c10; }
+    .status-header.info-header { background: #e7f3ff; border-left: 4px solid #0078d4; }
+
+    .status-title {
+        font-weight: 600;
+        font-size: 1em;
+    }
+
+    .status-arrow {
+        font-size: 0.85em;
+        transition: transform 0.2s;
+        color: #666;
+    }
+
+    .status-arrow.open { transform: rotate(180deg); }
+
+    .status-body {
+        display: none;
+        padding: 8px 12px 12px 12px;
+    }
+
+    .status-body.active {
+        display: block;
+    }
+
+    /* Filter controls enhancements */
+    .controls-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .filter-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .filter-group label {
+        font-size: 0.85em;
+        font-weight: 600;
+        color: #555;
+    }
+
+    .controls-bar select {
+        min-width: 140px;
+    }
+
+    .clear-filters-btn {
+        background: #f0f0f0;
+        color: #333;
+        border: 1px solid #ccc;
+        padding: 10px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.95em;
+    }
+
+    .clear-filters-btn:hover {
+        background: #e0e0e0;
+    }
+
+    .filter-count {
+        font-size: 0.85em;
+        color: #666;
+        margin-left: auto;
+    }
+
+    /* Compliance Progress Bars (Defender for Cloud real data) */
+    .compliance-source-label {
+        font-size: 0.8em;
+        color: #8a8886;
+        margin-bottom: 15px;
+        font-style: italic;
+    }
+
+    .compliance-standard-card {
+        background: white;
+        border: 1px solid #e1dfdd;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 15px;
+    }
+
+    .compliance-standard-card h3 {
+        font-size: 1.05em;
+        color: #323130;
+        margin-bottom: 12px;
+    }
+
+    .compliance-progress-bar {
+        background: #e1dfdd;
+        border-radius: 6px;
+        height: 24px;
+        overflow: hidden;
+        margin-bottom: 10px;
+        position: relative;
+    }
+
+    .compliance-progress-fill {
+        height: 100%;
+        border-radius: 6px;
+        transition: width 0.3s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 0.8em;
+        font-weight: 600;
+        min-width: 40px;
+    }
+
+    .compliance-progress-fill.high { background: #107c10; }
+    .compliance-progress-fill.medium { background: #ff8c00; }
+    .compliance-progress-fill.low { background: #d13438; }
+
+    .compliance-stats-row {
+        display: flex;
+        gap: 20px;
+        font-size: 0.85em;
+        color: #605e5c;
+        margin-bottom: 8px;
+    }
+
+    .compliance-stats-row span {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .stat-passed { color: #107c10; font-weight: 600; }
+    .stat-failed { color: #d13438; font-weight: 600; }
+
+    .compliance-detail-toggle {
+        background: none;
+        border: 1px solid #0078d4;
+        color: #0078d4;
+        padding: 4px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.8em;
+        margin-top: 4px;
+    }
+
+    .compliance-detail-toggle:hover {
+        background: #0078d4;
+        color: white;
+    }
+
+    .compliance-detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 0.85em;
+        display: none;
+    }
+
+    .compliance-detail-table.active {
+        display: table;
+    }
+
+    .compliance-detail-table th {
+        background: #f3f2f1;
+        text-align: left;
+        padding: 8px 12px;
+        font-weight: 600;
+        border-bottom: 2px solid #e1dfdd;
+    }
+
+    .compliance-detail-table td {
+        padding: 6px 12px;
+        border-bottom: 1px solid #f3f2f1;
+    }
+
+    .compliance-detail-table tr:hover td {
+        background: #f8f8f8;
+    }
+
+    .control-status-passed { color: #107c10; font-weight: 600; }
+    .control-status-failed { color: #d13438; font-weight: 600; }
+    .control-status-na { color: #8a8886; }
+
+    .compliance-fallback-note {
+        font-size: 0.8em;
+        color: #8a8886;
+        font-style: italic;
+        margin-top: 10px;
+    }
 </style>
 '@
 }
@@ -591,12 +884,71 @@ function Get-ExecutiveDashboard {
         [object]$ComplianceGap,
 
         [Parameter(Mandatory)]
-        [object]$TenantInfo
+        [object]$TenantInfo,
+
+        [object]$DefenderCompliance
     )
+
+    # Build compliance impact section based on data source
+    $hasDefenderData = ($DefenderCompliance -and
+        $DefenderCompliance.Summary -and
+        $DefenderCompliance.Summary.TotalStandards -gt 0)
+
+    $complianceCards = ""
+    if ($hasDefenderData) {
+        # Show real Defender compliance data - up to 4 standards as summary cards
+        $standardsShown = 0
+        foreach ($sub in $DefenderCompliance.Subscriptions) {
+            foreach ($std in $sub.Standards) {
+                if ($standardsShown -ge 4) { break }
+                $total = $std.PassedControls + $std.FailedControls
+                $pct = if ($total -gt 0) { [math]::Round(($std.PassedControls / $total) * 100, 0) } else { 0 }
+                $cardColor = if ($pct -ge 80) { '' } elseif ($pct -ge 60) { 'medium' } else { 'critical' }
+
+                $complianceCards += @"
+            <div class="metric-card $cardColor">
+                <div class="metric-label">$($std.ShortName)</div>
+                <div class="metric-value">$pct%</div>
+                <div>$($std.PassedControls) of $total passed</div>
+            </div>
+"@
+                $standardsShown++
+            }
+            if ($standardsShown -ge 4) { break }
+        }
+    }
+    else {
+        # Fallback: show subjective compliance gap counts
+        $complianceCards = @"
+            <div class="metric-card">
+                <div class="metric-label">CIS M365 Controls</div>
+                <div class="metric-value">$($ComplianceGap.FrameworkGaps.CIS.ControlsAffected)</div>
+                <div>Controls with findings</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">NIST CSF Functions</div>
+                <div class="metric-value">$($ComplianceGap.FrameworkGaps.NIST.ControlsAffected)</div>
+                <div>Functions with findings</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">SOC 2 Criteria</div>
+                <div class="metric-value">$($ComplianceGap.FrameworkGaps.SOC2.ControlsAffected)</div>
+                <div>Criteria with findings</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-label">PCI-DSS Requirements</div>
+                <div class="metric-value">$($ComplianceGap.FrameworkGaps.PCIDSS.ControlsAffected)</div>
+                <div>Requirements with findings</div>
+            </div>
+"@
+    }
 
     return @"
 <section class="executive-dashboard" id="executive">
-    <h2 class="section-title">📊 Executive Summary</h2>
+    <h2 class="section-title">&#128202; Executive Summary</h2>
 
     <div class="dashboard-grid">
         <div class="metric-card critical">
@@ -625,38 +977,16 @@ function Get-ExecutiveDashboard {
     </div>
 
     <div style="margin-top: 30px;">
-        <h3>📈 Risk Analysis</h3>
+        <h3>&#128200; Risk Analysis</h3>
         <p><strong>Average Risk Score:</strong> $($RiskSummary.AverageRiskScore) / 100</p>
         <p><strong>Highest Risk Score:</strong> $($RiskSummary.MaxRiskScore) / 100</p>
         <p><strong>Top Priority Items:</strong> $($RiskSummary.TopPriorityCount) findings require immediate attention</p>
     </div>
 
     <div style="margin-top: 30px;">
-        <h3>📋 Compliance Impact</h3>
+        <h3>&#128203; Compliance Impact</h3>
         <div class="dashboard-grid">
-            <div class="metric-card">
-                <div class="metric-label">CIS M365 Controls</div>
-                <div class="metric-value">$($ComplianceGap.FrameworkGaps.CIS.ControlsAffected)</div>
-                <div>Controls with findings</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">NIST CSF Functions</div>
-                <div class="metric-value">$($ComplianceGap.FrameworkGaps.NIST.ControlsAffected)</div>
-                <div>Functions with findings</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">SOC 2 Criteria</div>
-                <div class="metric-value">$($ComplianceGap.FrameworkGaps.SOC2.ControlsAffected)</div>
-                <div>Criteria with findings</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">PCI-DSS Requirements</div>
-                <div class="metric-value">$($ComplianceGap.FrameworkGaps.PCIDSS.ControlsAffected)</div>
-                <div>Requirements with findings</div>
-            </div>
+$complianceCards
         </div>
     </div>
 </section>
@@ -672,7 +1002,7 @@ function Get-QuickWinsSection {
     if ($QuickWins.Count -eq 0) {
         return @"
 <section class="section" id="quick-wins">
-    <h2 class="section-title">⚡ Quick Wins</h2>
+    <h2 class="section-title">&#9889; Quick Wins</h2>
     <p>No quick wins identified - all findings require moderate to high effort.</p>
 </section>
 "@
@@ -697,7 +1027,7 @@ function Get-QuickWinsSection {
 
     return @"
 <section class="section" id="quick-wins">
-    <h2 class="section-title">⚡ Quick Wins - High Impact, Low Effort</h2>
+    <h2 class="section-title">&#9889; Quick Wins - High Impact, Low Effort</h2>
     <p>These findings provide significant security improvements with minimal implementation time. Prioritize these for immediate action.</p>
     <div class="quick-wins-grid">
         $quickWinCards
@@ -732,7 +1062,7 @@ function Get-PrioritySection {
 
     return @"
 <section class="section" id="priority">
-    <h2 class="section-title">🎯 Top Priority Findings - Recommended Remediation Order</h2>
+    <h2 class="section-title">&#127919; Top Priority Findings - Recommended Remediation Order</h2>
     <p>Findings are prioritized by their Priority Score (Risk Score / Remediation Effort), providing the best return on investment.</p>
 
     <table class="priority-table">
@@ -755,6 +1085,159 @@ function Get-PrioritySection {
 }
 
 function Get-ComplianceSection {
+    param(
+        [Parameter(Mandatory)]
+        [array]$Findings,
+
+        [Parameter(Mandatory)]
+        [object]$ComplianceGap,
+
+        [object]$DefenderCompliance
+    )
+
+    # Determine if real Defender for Cloud data is available
+    $hasDefenderData = ($DefenderCompliance -and
+        $DefenderCompliance.Summary -and
+        $DefenderCompliance.Summary.TotalStandards -gt 0)
+
+    if ($hasDefenderData) {
+        return Get-ComplianceSectionFromDefender -DefenderCompliance $DefenderCompliance
+    }
+    else {
+        return Get-ComplianceSectionFallback -Findings $Findings -ComplianceGap $ComplianceGap
+    }
+}
+
+function Get-ComplianceSectionFromDefender {
+    param(
+        [Parameter(Mandatory)]
+        [object]$DefenderCompliance
+    )
+
+    $standardCards = ""
+    $cardIndex = 0
+
+    # Aggregate standards across subscriptions
+    $standardsMap = @{}
+    foreach ($sub in $DefenderCompliance.Subscriptions) {
+        foreach ($std in $sub.Standards) {
+            $key = $std.StandardName
+            if (-not $standardsMap.ContainsKey($key)) {
+                $standardsMap[$key] = @{
+                    StandardName = $std.StandardName
+                    ShortName = $std.ShortName
+                    Framework = $std.Framework
+                    PassedControls = 0
+                    FailedControls = 0
+                    TotalControls = 0
+                    CompliancePercent = 0
+                    Subscriptions = @()
+                }
+            }
+            $standardsMap[$key].PassedControls += $std.PassedControls
+            $standardsMap[$key].FailedControls += $std.FailedControls
+            $standardsMap[$key].TotalControls += ($std.PassedControls + $std.FailedControls)
+            $standardsMap[$key].Subscriptions += $sub.SubscriptionName
+        }
+    }
+
+    # Sort standards by name
+    $sortedStandards = $standardsMap.GetEnumerator() | Sort-Object { $_.Value.StandardName }
+
+    foreach ($entry in $sortedStandards) {
+        $std = $entry.Value
+        $total = $std.TotalControls
+        $passed = $std.PassedControls
+        $failed = $std.FailedControls
+        $pct = if ($total -gt 0) { [math]::Round(($passed / $total) * 100, 1) } else { 0 }
+
+        $progressClass = if ($pct -ge 80) { 'high' } elseif ($pct -ge 60) { 'medium' } else { 'low' }
+        $subList = ($std.Subscriptions | Select-Object -Unique) -join ', '
+
+        # Get controls for this standard for the detail table
+        $stdControls = @($DefenderCompliance.Controls | Where-Object {
+                $_.Framework -eq $std.Framework -or $_.Framework -eq $std.ShortName
+            })
+
+        $controlRows = ""
+        if ($stdControls.Count -gt 0) {
+            $sortedControls = $stdControls | Sort-Object ControlId
+            foreach ($ctrl in $sortedControls) {
+                $statusClass = switch ($ctrl.Status) {
+                    'Passed' { 'control-status-passed' }
+                    'Failed' { 'control-status-failed' }
+                    default { 'control-status-na' }
+                }
+                $titleSafe = $ctrl.ControlTitle -replace '<', '&lt;' -replace '>', '&gt;'
+                $controlRows += @"
+            <tr>
+                <td>$($ctrl.ControlId)</td>
+                <td>$titleSafe</td>
+                <td class="$statusClass">$($ctrl.Status)</td>
+                <td>$($ctrl.PassedResources)</td>
+                <td>$($ctrl.FailedResources)</td>
+            </tr>
+"@
+            }
+        }
+
+        $detailTable = ""
+        if ($controlRows) {
+            $detailTable = @"
+        <button class="compliance-detail-toggle" onclick="toggleComplianceDetail(this)">Show Control Details</button>
+        <table class="compliance-detail-table" id="compliance-detail-$cardIndex">
+            <thead>
+                <tr>
+                    <th>Control ID</th>
+                    <th>Control</th>
+                    <th>Status</th>
+                    <th>Passed</th>
+                    <th>Failed</th>
+                </tr>
+            </thead>
+            <tbody>
+$controlRows
+            </tbody>
+        </table>
+"@
+        }
+
+        $standardCards += @"
+    <div class="compliance-standard-card">
+        <h3>$($std.StandardName -replace '<', '&lt;' -replace '>', '&gt;')</h3>
+        <div class="compliance-progress-bar">
+            <div class="compliance-progress-fill $progressClass" style="width: $pct%">$pct%</div>
+        </div>
+        <div class="compliance-stats-row">
+            <span class="stat-passed">&#10003; $passed Passed</span>
+            <span class="stat-failed">&#10007; $failed Failed</span>
+            <span>$total Total Controls</span>
+        </div>
+        <div class="compliance-stats-row">
+            <span>Subscriptions: $subList</span>
+        </div>
+$detailTable
+    </div>
+"@
+        $cardIndex++
+    }
+
+    $totalPassed = $DefenderCompliance.Summary.PassedControls
+    $totalFailed = $DefenderCompliance.Summary.FailedControls
+    $totalAll = $totalPassed + $totalFailed
+    $overallPct = if ($totalAll -gt 0) { [math]::Round(($totalPassed / $totalAll) * 100, 1) } else { 0 }
+
+    return @"
+<section class="section" id="compliance">
+    <h2 class="section-title">&#128203; Regulatory Compliance (Defender for Cloud)</h2>
+    <p class="compliance-source-label">Source: Microsoft Defender for Cloud Regulatory Compliance | $($DefenderCompliance.Summary.TotalStandards) standards across $($DefenderCompliance.Summary.TotalSubscriptions) subscription(s) | Overall: $totalPassed of $totalAll controls passed ($overallPct%)</p>
+
+    $standardCards
+</section>
+"@
+}
+
+function Get-ComplianceSectionFallback {
     param(
         [Parameter(Mandatory)]
         [array]$Findings,
@@ -821,7 +1304,7 @@ function Get-ComplianceSection {
 
     return @"
 <section class="section" id="compliance">
-    <h2 class="section-title">📋 Compliance Framework Mapping</h2>
+    <h2 class="section-title">&#128203; Compliance Framework Mapping</h2>
     <p>This assessment maps findings to industry-standard compliance frameworks, helping you understand regulatory impact and compliance gaps.</p>
 
     <div class="compliance-grid">
@@ -830,6 +1313,7 @@ function Get-ComplianceSection {
         $soc2Card
         $pciCard
     </div>
+    <p class="compliance-fallback-note">Based on EntraChecks assessment mapping. Enable regulatory compliance standards in Microsoft Defender for Cloud for real-time compliance data.</p>
 </section>
 "@
 }
@@ -840,35 +1324,39 @@ function Get-DetailedFindingsSection {
         [array]$Findings
     )
 
-    # Group findings by risk level
-    $critical = @($Findings | Where-Object { $_.RiskLevel -eq 'Critical' })
-    $high = @($Findings | Where-Object { $_.RiskLevel -eq 'High' })
-    $medium = @($Findings | Where-Object { $_.RiskLevel -eq 'Medium' })
-    $low = @($Findings | Where-Object { $_.RiskLevel -eq 'Low' -or $_.RiskLevel -eq 'Info' })
-
-    $findingCards = ""
-
-    # Helper function to generate finding card
+    # Helper function to generate a single finding card with data attributes for filtering
     function Get-FindingCard {
         param($finding)
 
+        $riskLevel = if ($finding.RiskLevel) { $finding.RiskLevel } else { 'Info' }
+        $riskLower = $riskLevel.ToLower()
+        $status = if ($finding.Status) { $finding.Status } else { 'INFO' }
+        $statusLower = $status.ToLower()
+        $category = if ($finding.Category) { $finding.Category } else { 'General' }
+        $categoryLower = $category.ToLower() -replace '\s+', '-'
+
+        $descSafe = if ($finding.Description) { $finding.Description -replace '<', '&lt;' -replace '>', '&gt;' } else { 'N/A' }
+        $objSafe = if ($finding.Object) { $finding.Object -replace '<', '&lt;' -replace '>', '&gt;' } else { 'N/A' }
+        $remSafe = if ($finding.Remediation) { $finding.Remediation -replace '<', '&lt;' -replace '>', '&gt;' } else { '' }
+
         $complianceRef = if ($finding.ComplianceReference) {
             "<p><strong>Compliance Frameworks:</strong> $($finding.ComplianceReference)</p>"
-        } else { "" }
+        }
+        else { "" }
 
         $remediationGuidance = ""
         if ($finding.RemediationGuidance) {
             $rg = $finding.RemediationGuidance
-            $stepsHtml = ($rg.StepsPortal | ForEach-Object { "<li>$_</li>" }) -join ""
+            $stepsHtml = ($rg.StepsPortal | ForEach-Object { "<li>$($_ -replace '^\d+\.\s*', '')</li>" }) -join ""
 
             $remediationGuidance = @"
 <div class="remediation-steps">
-    <h4>ðŸ“ Remediation Steps (Azure Portal)</h4>
+    <h4>&#128273; Remediation Steps (Azure Portal)</h4>
     <ol>
         $stepsHtml
     </ol>
 
-    <h4 style="margin-top: 15px;">ðŸ’» PowerShell Remediation</h4>
+    <h4 style="margin-top: 15px;">&#128187; PowerShell Remediation</h4>
     <div class="code-block">$($rg.StepsPowerShell -replace '<', '&lt;' -replace '>', '&gt;')</div>
 
     <p style="margin-top: 10px;"><strong>Impact:</strong> $($rg.Impact.Positive)</p>
@@ -878,17 +1366,17 @@ function Get-DetailedFindingsSection {
         }
 
         return @"
-<div class="finding-card">
+<div class="finding-card" data-risk="$riskLower" data-status="$statusLower" data-category="$categoryLower">
     <div class="finding-header" onclick="toggleFinding(this)">
         <div>
-            <span class="risk-badge $($finding.RiskLevel.ToLower())">$($finding.RiskLevel)</span>
-            <span class="finding-title">$($finding.Description -replace '<', '&lt;' -replace '>', '&gt;')</span>
+            <span class="risk-badge $riskLower">$riskLevel</span>
+            <span class="finding-title">$descSafe</span>
         </div>
-        <span>â–¼</span>
+        <span>&#9660;</span>
     </div>
     <div class="finding-body">
         <div class="finding-meta">
-            <div><strong>Object:</strong> $($finding.Object -replace '<', '&lt;' -replace '>', '&gt;')</div>
+            <div><strong>Object:</strong> $objSafe</div>
             <div><strong>Risk Score:</strong> $($finding.RiskScore) / 100</div>
             <div><strong>Priority Score:</strong> $($finding.PriorityScore)</div>
             <div><strong>Remediation Effort:</strong> $($finding.RemediationEffortDescription)</div>
@@ -896,7 +1384,7 @@ function Get-DetailedFindingsSection {
 
         $complianceRef
 
-        <p style="margin: 15px 0;"><strong>Quick Remediation:</strong> $($finding.Remediation -replace '<', '&lt;' -replace '>', '&gt;')</p>
+        $(if ($remSafe) { "<p style='margin: 15px 0;'><strong>Quick Remediation:</strong> $remSafe</p>" })
 
         $remediationGuidance
     </div>
@@ -904,150 +1392,281 @@ function Get-DetailedFindingsSection {
 "@
     }
 
-    # Generate cards for each risk level
-    if ($critical.Count -gt 0) {
-        $findingCards += "<h3 style='color: #d13438; margin-top: 20px;'>🔴 Critical Risk Findings ($($critical.Count))</h3>"
-        foreach ($f in $critical) {
-            $findingCards += Get-FindingCard -finding $f
-        }
+    # Gather unique categories and build the accordion structure
+    $categoryGroups = $Findings | Group-Object {
+        if ($_.Category) { $_.Category } else { 'General' }
+    } | Sort-Object Name
+
+    # Build category filter options
+    $categoryOptions = ""
+    foreach ($cg in $categoryGroups) {
+        $catSafe = $cg.Name -replace '<', '&lt;' -replace '>', '&gt;'
+        $catValue = $cg.Name.ToLower() -replace '\s+', '-'
+        $categoryOptions += "            <option value=`"$catValue`">$catSafe ($($cg.Count))</option>`n"
     }
 
-    if ($high.Count -gt 0) {
-        $findingCards += "<h3 style='color: #ff8c00; margin-top: 30px;'>🟠ðŸŸ  High Risk Findings ($($high.Count))</h3>"
-        foreach ($f in $high) {
-            $findingCards += Get-FindingCard -finding $f
-        }
-    }
+    # Build category accordions
+    $categoryAccordions = ""
+    $statusOrder = @('FAIL', 'WARNING', 'INFO', 'OK')
 
-    if ($medium.Count -gt 0) {
-        $findingCards += "<h3 style='color: #ffb900; margin-top: 30px;'>🟡ðŸŸ¡ Medium Risk Findings ($($medium.Count))</h3>"
-        foreach ($f in $medium) {
-            $findingCards += Get-FindingCard -finding $f
-        }
-    }
+    foreach ($catGroup in $categoryGroups) {
+        $catName = $catGroup.Name
+        $catNameSafe = $catName -replace '<', '&lt;' -replace '>', '&gt;'
+        $catValue = $catName.ToLower() -replace '\s+', '-'
+        $catFindings = @($catGroup.Group)
 
-    if ($low.Count -gt 0) {
-        $findingCards += "<h3 style='color: #107c10; margin-top: 30px;'>🟢ðŸŸ¢ Low Risk Findings ($($low.Count))</h3>"
-        foreach ($f in $low) {
-            $findingCards += Get-FindingCard -finding $f
-        }
-    }
+        # Count by status for badges
+        $failN = @($catFindings | Where-Object { $_.Status -eq 'FAIL' }).Count
+        $warnN = @($catFindings | Where-Object { $_.Status -eq 'WARNING' }).Count
+        $okN = @($catFindings | Where-Object { $_.Status -eq 'OK' }).Count
+        $infoN = @($catFindings | Where-Object { $_.Status -eq 'INFO' }).Count
 
-    return @"
-        <section class="section" id="detailed">
-        <h2 class="section-title">ðŸ“‹ Detailed Findings</h2>
-    <div class="controls-bar">
-        <input type="text" id="searchBox" placeholder="Search findings..." onkeyup="searchFindings()">
-        <select id="riskFilter" onchange="filterByRisk()">
-            <option value="all">All Risk Levels</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-        </select>
-        <button class="expand-all-btn" onclick="expandAll()">Expand All</button>
-        <button class="expand-all-btn" onclick="collapseAll()">Collapse All</button>
+        $badges = ""
+        if ($failN -gt 0) { $badges += "<span class='count-badge fail-badge'>$failN FAIL</span>" }
+        if ($warnN -gt 0) { $badges += "<span class='count-badge warning-badge'>$warnN WARNING</span>" }
+        if ($infoN -gt 0) { $badges += "<span class='count-badge info-badge'>$infoN INFO</span>" }
+        if ($okN -gt 0) { $badges += "<span class='count-badge ok-badge'>$okN OK</span>" }
+
+        # Build status sub-accordions within this category
+        $statusAccordions = ""
+        foreach ($st in $statusOrder) {
+            $stFindings = @($catFindings | Where-Object { $_.Status -eq $st })
+            if ($stFindings.Count -eq 0) { continue }
+
+            $stLower = $st.ToLower()
+            $stHeaderClass = "$stLower-header"
+
+            # Sort findings within status by risk score descending
+            $stFindings = $stFindings | Sort-Object { if ($_.RiskScore) { $_.RiskScore } else { 0 } } -Descending
+
+            $findingCards = ""
+            foreach ($f in $stFindings) {
+                $findingCards += Get-FindingCard -finding $f
+            }
+
+            $statusAccordions += @"
+        <div class="status-accordion" data-status="$stLower">
+            <div class="status-header $stHeaderClass" onclick="toggleStatus(this)">
+                <span class="status-title">$st ($($stFindings.Count))</span>
+                <span class="status-arrow">&#9660;</span>
+            </div>
+            <div class="status-body">
+                $findingCards
+            </div>
+        </div>
+"@
+        }
+
+        $categoryAccordions += @"
+    <div class="category-accordion" data-category="$catValue">
+        <div class="category-header" onclick="toggleCategory(this)">
+            <span class="category-title">$catNameSafe ($($catFindings.Count))</span>
+            <span class="category-badges">$badges</span>
+            <span class="category-arrow">&#9660;</span>
+        </div>
+        <div class="category-body">
+            $statusAccordions
+        </div>
     </div>
-
-    $findingCards
-</section>
 "@
     }
 
-    function Get-HTMLJavaScript {
-        return @'
-<script>
-    // Toggle individual finding
-    function toggleFinding(header) {
-        const body = header.nextElementSibling;
-        const arrow = header.querySelector('span:last-child');
+    return @"
+<section class="section" id="detailed">
+    <h2 class="section-title">Detailed Findings</h2>
+    <div class="controls-bar">
+        <input type="text" id="searchBox" placeholder="Search findings..." onkeyup="applyFilters()">
+        <div class="filter-group">
+            <label for="categoryFilter">Category:</label>
+            <select id="categoryFilter" onchange="applyFilters()">
+                <option value="all">All Categories</option>
+$categoryOptions
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="statusFilter">Status:</label>
+            <select id="statusFilter" onchange="applyFilters()">
+                <option value="all">All Statuses</option>
+                <option value="fail">FAIL</option>
+                <option value="warning">WARNING</option>
+                <option value="info">INFO</option>
+                <option value="ok">OK</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="riskFilter">Risk:</label>
+            <select id="riskFilter" onchange="applyFilters()">
+                <option value="all">All Risk Levels</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+            </select>
+        </div>
+        <button class="expand-all-btn" onclick="expandAllCategories()">Expand All</button>
+        <button class="expand-all-btn" onclick="collapseAllCategories()">Collapse All</button>
+        <button class="clear-filters-btn" onclick="clearFilters()">Clear Filters</button>
+        <span class="filter-count" id="filterCount"></span>
+    </div>
 
-        if (body.classList.contains('active')) {
-            body.classList.remove('active');
-            arrow.textContent = 'â–¼';
-        } else {
-            body.classList.add('active');
-            arrow.textContent = 'â–²';
+    $categoryAccordions
+</section>
+"@
+}
+
+function Get-HTMLJavaScript {
+    return @'
+<script>
+    function toggleComplianceDetail(btn) {
+        var table = btn.nextElementSibling;
+        if (table && table.classList.contains('compliance-detail-table')) {
+            if (table.classList.contains('active')) {
+                table.classList.remove('active');
+                btn.textContent = 'Show Control Details';
+            } else {
+                table.classList.add('active');
+                btn.textContent = 'Hide Control Details';
+            }
         }
     }
 
-    // Expand all findings
-    function expandAll() {
-        document.querySelectorAll('.finding-body').forEach(body => {
-            body.classList.add('active');
-        });
-        document.querySelectorAll('.finding-header span:last-child').forEach(arrow => {
-            arrow.textContent = 'â–²';
-        });
-    }
-
-    // Collapse all findings
-    function collapseAll() {
-        document.querySelectorAll('.finding-body').forEach(body => {
+    function toggleCategory(header) {
+        var body = header.nextElementSibling;
+        var arrow = header.querySelector('.category-arrow');
+        if (body.classList.contains('active')) {
             body.classList.remove('active');
-        });
-        document.querySelectorAll('.finding-header span:last-child').forEach(arrow => {
-            arrow.textContent = 'â–¼';
-        });
+            arrow.classList.remove('open');
+        } else {
+            body.classList.add('active');
+            arrow.classList.add('open');
+        }
     }
 
-    // Search findings
-    function searchFindings() {
-        const searchTerm = document.getElementById('searchBox').value.toLowerCase();
-        const cards = document.querySelectorAll('.finding-card');
+    function toggleStatus(header) {
+        var body = header.nextElementSibling;
+        var arrow = header.querySelector('.status-arrow');
+        if (body.classList.contains('active')) {
+            body.classList.remove('active');
+            arrow.classList.remove('open');
+        } else {
+            body.classList.add('active');
+            arrow.classList.add('open');
+        }
+    }
 
-        cards.forEach(card => {
-            const text = card.textContent.toLowerCase();
-            if (text.includes(searchTerm)) {
-                card.style.display = '';
-            } else {
-                card.style.display = 'none';
+    function toggleFinding(header) {
+        var body = header.nextElementSibling;
+        var arrow = header.querySelector('.finding-arrow');
+        if (body.classList.contains('active')) {
+            body.classList.remove('active');
+            if (arrow) arrow.innerHTML = '&#9660;';
+        } else {
+            body.classList.add('active');
+            if (arrow) arrow.innerHTML = '&#9650;';
+        }
+    }
+
+    function expandAllCategories() {
+        document.querySelectorAll('.category-body').forEach(function(b) { b.classList.add('active'); });
+        document.querySelectorAll('.category-arrow').forEach(function(a) { a.classList.add('open'); });
+        document.querySelectorAll('.status-body').forEach(function(b) { b.classList.add('active'); });
+        document.querySelectorAll('.status-arrow').forEach(function(a) { a.classList.add('open'); });
+        document.querySelectorAll('.finding-body').forEach(function(b) { b.classList.add('active'); });
+        document.querySelectorAll('.finding-arrow').forEach(function(a) { a.innerHTML = '&#9650;'; });
+    }
+
+    function collapseAllCategories() {
+        document.querySelectorAll('.category-body').forEach(function(b) { b.classList.remove('active'); });
+        document.querySelectorAll('.category-arrow').forEach(function(a) { a.classList.remove('open'); });
+        document.querySelectorAll('.status-body').forEach(function(b) { b.classList.remove('active'); });
+        document.querySelectorAll('.status-arrow').forEach(function(a) { a.classList.remove('open'); });
+        document.querySelectorAll('.finding-body').forEach(function(b) { b.classList.remove('active'); });
+        document.querySelectorAll('.finding-arrow').forEach(function(a) { a.innerHTML = '&#9660;'; });
+    }
+
+    function applyFilters() {
+        var searchTerm = document.getElementById('searchBox').value.toLowerCase();
+        var categoryVal = document.getElementById('categoryFilter').value;
+        var statusVal = document.getElementById('statusFilter').value;
+        var riskVal = document.getElementById('riskFilter').value;
+
+        var totalVisible = 0;
+        var totalCards = 0;
+
+        document.querySelectorAll('.finding-card').forEach(function(card) {
+            totalCards++;
+            var show = true;
+
+            if (searchTerm && !card.textContent.toLowerCase().includes(searchTerm)) {
+                show = false;
             }
-        });
-    }
-
-    // Filter by risk level
-    function filterByRisk() {
-        const riskLevel = document.getElementById('riskFilter').value;
-        const cards = document.querySelectorAll('.finding-card');
-
-        cards.forEach(card => {
-            if (riskLevel === 'all') {
-                card.style.display = '';
-            } else {
-                const badge = card.querySelector('.risk-badge');
-                if (badge && badge.classList.contains(riskLevel)) {
-                    card.style.display = '';
-                } else {
-                    card.style.display = 'none';
-                }
+            if (show && categoryVal !== 'all' && card.getAttribute('data-category') !== categoryVal) {
+                show = false;
             }
+            if (show && statusVal !== 'all' && card.getAttribute('data-status') !== statusVal) {
+                show = false;
+            }
+            if (show && riskVal !== 'all' && card.getAttribute('data-risk') !== riskVal) {
+                show = false;
+            }
+
+            card.style.display = show ? '' : 'none';
+            if (show) totalVisible++;
         });
+
+        document.querySelectorAll('.status-accordion').forEach(function(sa) {
+            var visibleCards = sa.querySelectorAll('.finding-card:not([style*="display: none"])').length;
+            sa.style.display = visibleCards > 0 ? '' : 'none';
+        });
+
+        document.querySelectorAll('.category-accordion').forEach(function(ca) {
+            var visibleCards = ca.querySelectorAll('.finding-card:not([style*="display: none"])').length;
+            ca.style.display = visibleCards > 0 ? '' : 'none';
+        });
+
+        var countEl = document.getElementById('filterCount');
+        if (searchTerm || categoryVal !== 'all' || statusVal !== 'all' || riskVal !== 'all') {
+            countEl.textContent = 'Showing ' + totalVisible + ' of ' + totalCards + ' findings';
+        } else {
+            countEl.textContent = '';
+        }
+
+        if (searchTerm || categoryVal !== 'all' || statusVal !== 'all' || riskVal !== 'all') {
+            document.querySelectorAll('.category-accordion:not([style*="display: none"]) .category-body').forEach(function(b) { b.classList.add('active'); });
+            document.querySelectorAll('.category-accordion:not([style*="display: none"]) .category-arrow').forEach(function(a) { a.classList.add('open'); });
+            document.querySelectorAll('.status-accordion:not([style*="display: none"]) .status-body').forEach(function(b) { b.classList.add('active'); });
+            document.querySelectorAll('.status-accordion:not([style*="display: none"]) .status-arrow').forEach(function(a) { a.classList.add('open'); });
+        }
     }
 
-    // Smooth scrolling for navigation
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    function clearFilters() {
+        document.getElementById('searchBox').value = '';
+        document.getElementById('categoryFilter').value = 'all';
+        document.getElementById('statusFilter').value = 'all';
+        document.getElementById('riskFilter').value = 'all';
+        applyFilters();
+        collapseAllCategories();
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(function(anchor) {
         anchor.addEventListener('click', function (e) {
             e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
+            var target = document.querySelector(this.getAttribute('href'));
             if (target) {
-                target.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         });
     });
 </script>
 '@
-    }
+}
 
-    #endregion
+#endregion
 
-    #region Export Module Members
+#region Export Module Members
 
-    Export-ModuleMember -Function @(
-        'New-EnhancedHTMLReport'
-    )
+Export-ModuleMember -Function @(
+    'New-EnhancedHTMLReport'
+)
 
-    #endregion
+#endregion

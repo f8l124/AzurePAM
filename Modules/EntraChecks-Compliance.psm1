@@ -520,7 +520,12 @@ $script:NISTControls = @(
 
 #region ==================== MODULE INITIALIZATION ====================
 
+<#
+.SYNOPSIS
+    Initializes the compliance module and verifies the findings collection is available.
+#>
 function Initialize-ComplianceModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -566,6 +571,7 @@ function Initialize-ComplianceModule {
     Hashtable with control mappings and compliance summary.
 #>
 function Get-CISComplianceMapping {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -573,14 +579,33 @@ function Get-CISComplianceMapping {
     )
     
     Write-Host "`n[+] Mapping findings to CIS Microsoft 365 Benchmark v3.0..." -ForegroundColor Cyan
-    
-    if (-not $Findings -or $Findings.Count -eq 0) {
-        Write-Host "    [!] No findings available to map" -ForegroundColor Yellow
+
+    # Filter to only actual finding objects with required properties
+    $validFindings = @($Findings | Where-Object {
+            $null -ne $_ -and $_.PSObject -and $_.PSObject.Properties.Name -contains 'CheckName'
+        })
+
+    if ($validFindings.Count -eq 0) {
+        Write-Host "    [!] No findings available to map (received $($Findings.Count) objects, 0 valid findings)" -ForegroundColor Yellow
         return $null
     }
-    
+
+    Write-Host "    [i] Mapping $($validFindings.Count) findings against $($script:CISControls.Count) controls..." -ForegroundColor Gray
+
+    # Build a lookup table: CheckName -> array of findings for fast matching
+    $findingsByCheckName = @{}
+    foreach ($f in $validFindings) {
+        $cn = $f.CheckName
+        if ($cn) {
+            if (-not $findingsByCheckName.ContainsKey($cn)) {
+                $findingsByCheckName[$cn] = [System.Collections.ArrayList]::new()
+            }
+            $findingsByCheckName[$cn].Add($f) | Out-Null
+        }
+    }
+
     $controlResults = @()
-    
+
     foreach ($control in $script:CISControls) {
         $result = @{
             ControlId = $control.ControlId
@@ -594,23 +619,34 @@ function Get-CISComplianceMapping {
             Evidence = ""
             Remediation = $control.DefaultRemediation
         }
-        
-        # Find related findings
-        $relatedFindings = @()
+
+        # Find related findings using the lookup table (primary) and regex fallback
+        $relatedFindings = [System.Collections.ArrayList]::new()
         foreach ($checkName in $control.MappedChecks) {
-            # Match findings by Object name containing check patterns
-            $checkPattern = $checkName -replace "Check-", ""
-            $matchingFindings = $Findings | Where-Object { 
-                $_.Object -match $checkPattern -or 
-                $_.Description -match $checkPattern -or
-                ($_.CheckName -and $_.CheckName -eq $checkName)
+            # Primary: exact CheckName match via lookup table
+            if ($findingsByCheckName.ContainsKey($checkName)) {
+                foreach ($f in $findingsByCheckName[$checkName]) {
+                    if (-not $relatedFindings.Contains($f)) {
+                        $relatedFindings.Add($f) | Out-Null
+                    }
+                }
             }
-            $relatedFindings += $matchingFindings
+
+            # Fallback: regex match on Object/Description fields
+            $checkPattern = $checkName -replace "Check-", ""
+            $regexMatches = @($validFindings | Where-Object {
+                    $_.Object -match $checkPattern -or
+                    $_.Description -match $checkPattern
+                })
+            foreach ($f in $regexMatches) {
+                if ($null -ne $f -and -not $relatedFindings.Contains($f)) {
+                    $relatedFindings.Add($f) | Out-Null
+                }
+            }
         }
-        
-        $relatedFindings = $relatedFindings | Select-Object -Unique
-        $result.Findings = $relatedFindings
-        
+
+        $result.Findings = @($relatedFindings)
+
         if ($relatedFindings.Count -eq 0) {
             $result.Status = "NOT_ASSESSED"
             $result.Evidence = "No check data available for this control. Run relevant security checks."
@@ -666,10 +702,15 @@ function Get-CISComplianceMapping {
         [math]::Round((($summary.Pass / $assessedControls) * 100), 1)
     } else { 0 }
     
+    # Diagnostic: show CheckName values found in findings for troubleshooting
+    $uniqueCheckNames = $findingsByCheckName.Keys | Sort-Object
+    Write-Host "    [i] Unique CheckNames in findings: $($uniqueCheckNames.Count) ($($uniqueCheckNames -join ', '))" -ForegroundColor Gray
+    Write-Host "    [i] Assessed: $($summary.TotalControls - $summary.NotAssessed)/$($summary.TotalControls) controls" -ForegroundColor Gray
+
     Write-Host "    [i] Compliance Score: $($summary.ComplianceScore)% ($($summary.Pass) pass, $($summary.Fail) fail, $($summary.Partial) partial)" -ForegroundColor $(
         if ($summary.ComplianceScore -ge 80) { "Green" } elseif ($summary.ComplianceScore -ge 60) { "Yellow" } else { "Red" }
     )
-    
+
     return @{
         Controls = $controlResults
         Summary = $summary
@@ -691,6 +732,7 @@ function Get-CISComplianceMapping {
     Hashtable with control mappings and compliance summary.
 #>
 function Get-NISTComplianceMapping {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -698,14 +740,33 @@ function Get-NISTComplianceMapping {
     )
     
     Write-Host "`n[+] Mapping findings to NIST 800-53 Rev 5..." -ForegroundColor Cyan
-    
-    if (-not $Findings -or $Findings.Count -eq 0) {
-        Write-Host "    [!] No findings available to map" -ForegroundColor Yellow
+
+    # Filter to only actual finding objects with required properties
+    $validFindings = @($Findings | Where-Object {
+            $null -ne $_ -and $_.PSObject -and $_.PSObject.Properties.Name -contains 'CheckName'
+        })
+
+    if ($validFindings.Count -eq 0) {
+        Write-Host "    [!] No findings available to map (received $($Findings.Count) objects, 0 valid findings)" -ForegroundColor Yellow
         return $null
     }
-    
+
+    Write-Host "    [i] Mapping $($validFindings.Count) findings against $($script:NISTControls.Count) controls..." -ForegroundColor Gray
+
+    # Build a lookup table: CheckName -> array of findings for fast matching
+    $findingsByCheckName = @{}
+    foreach ($f in $validFindings) {
+        $cn = $f.CheckName
+        if ($cn) {
+            if (-not $findingsByCheckName.ContainsKey($cn)) {
+                $findingsByCheckName[$cn] = [System.Collections.ArrayList]::new()
+            }
+            $findingsByCheckName[$cn].Add($f) | Out-Null
+        }
+    }
+
     $controlResults = @()
-    
+
     foreach ($control in $script:NISTControls) {
         $result = @{
             ControlId = $control.ControlId
@@ -719,22 +780,34 @@ function Get-NISTComplianceMapping {
             Evidence = ""
             Remediation = $control.DefaultRemediation
         }
-        
-        # Find related findings
-        $relatedFindings = @()
+
+        # Find related findings using the lookup table (primary) and regex fallback
+        $relatedFindings = [System.Collections.ArrayList]::new()
         foreach ($checkName in $control.MappedChecks) {
-            $checkPattern = $checkName -replace "Check-", ""
-            $matchingFindings = $Findings | Where-Object { 
-                $_.Object -match $checkPattern -or 
-                $_.Description -match $checkPattern -or
-                ($_.CheckName -and $_.CheckName -eq $checkName)
+            # Primary: exact CheckName match via lookup table
+            if ($findingsByCheckName.ContainsKey($checkName)) {
+                foreach ($f in $findingsByCheckName[$checkName]) {
+                    if (-not $relatedFindings.Contains($f)) {
+                        $relatedFindings.Add($f) | Out-Null
+                    }
+                }
             }
-            $relatedFindings += $matchingFindings
+
+            # Fallback: regex match on Object/Description fields
+            $checkPattern = $checkName -replace "Check-", ""
+            $regexMatches = @($validFindings | Where-Object {
+                    $_.Object -match $checkPattern -or
+                    $_.Description -match $checkPattern
+                })
+            foreach ($f in $regexMatches) {
+                if ($null -ne $f -and -not $relatedFindings.Contains($f)) {
+                    $relatedFindings.Add($f) | Out-Null
+                }
+            }
         }
-        
-        $relatedFindings = $relatedFindings | Select-Object -Unique
-        $result.Findings = $relatedFindings
-        
+
+        $result.Findings = @($relatedFindings)
+
         if ($relatedFindings.Count -eq 0) {
             $result.Status = "NOT_ASSESSED"
             $result.Evidence = "No check data available for this control."
@@ -799,10 +872,13 @@ function Get-NISTComplianceMapping {
         [math]::Round((($summary.Pass / $assessedControls) * 100), 1)
     } else { 0 }
     
+    # Diagnostic: show match stats
+    Write-Host "    [i] Assessed: $($summary.TotalControls - $summary.NotAssessed)/$($summary.TotalControls) controls" -ForegroundColor Gray
+
     Write-Host "    [i] Compliance Score: $($summary.ComplianceScore)% ($($summary.Pass) pass, $($summary.Fail) fail, $($summary.Partial) partial)" -ForegroundColor $(
         if ($summary.ComplianceScore -ge 80) { "Green" } elseif ($summary.ComplianceScore -ge 60) { "Yellow" } else { "Red" }
     )
-    
+
     return @{
         Controls = $controlResults
         Summary = $summary
@@ -915,6 +991,7 @@ function Get-ComplianceGaps {
     Hashtable with compliance scores.
 #>
 function Get-ComplianceScore {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -991,6 +1068,7 @@ function Get-ComplianceScore {
     Name of the tenant being assessed.
 #>
 function Export-ComplianceReportHTML {
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -1581,6 +1659,7 @@ function Export-ComplianceReportCSV {
     Array of frameworks to include. Default: @("CIS", "NIST")
 #>
 function Export-ComplianceReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -1722,6 +1801,7 @@ Export-ModuleMember -Function @(
     Pre-loaded Defender compliance data. If not provided, will attempt to retrieve.
 #>
 function Export-UnifiedComplianceReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -2109,9 +2189,8 @@ function Export-UnifiedComplianceReport {
         
         # Add gaps from incomplete improvement actions
         if ($pvData.ComplianceManager.Actions) {
-            $actionGaps = $pvData.ComplianceManager.Actions | 
-                Where-Object { $_.Status -notin @("Passed", "NotApplicable") } | 
-                Select-Object -First 10 | 
+            $actionGaps = $pvData.ComplianceManager.Actions |
+                Where-Object { $_.Status -notin @("Passed", "NotApplicable") } |
                 ForEach-Object {
                     [PSCustomObject]@{
                         Framework = "Compliance Manager"
@@ -2338,8 +2417,8 @@ function Export-UnifiedComplianceReport {
 <body>
     <div class="container">
         <header>
-            <h1>Unified Compliance Assessment Report</h1>
-            <p>Consolidated compliance posture across all data sources and frameworks</p>
+            <h1>Security Assessment Report</h1>
+            <p>Comprehensive security findings, discovery, and compliance posture</p>
             <div class="meta-grid">
                 <div class="meta-item">
                     <label>Organization</label>
@@ -2350,8 +2429,8 @@ function Export-UnifiedComplianceReport {
                     <span>$assessmentDate</span>
                 </div>
                 <div class="meta-item">
-                    <label>Frameworks Assessed</label>
-                    <span>$($unifiedData.Frameworks.Count)</span>
+                    <label>Total Findings</label>
+                    <span>$($Findings.Count)</span>
                 </div>
                 <div class="meta-item">
                     <label>Data Sources</label>
@@ -2359,6 +2438,97 @@ function Export-UnifiedComplianceReport {
                 </div>
             </div>
         </header>
+"@
+
+    # Findings Summary Dashboard
+    $fFailCount = @($Findings | Where-Object { $_.Status -eq 'FAIL' }).Count
+    $fWarnCount = @($Findings | Where-Object { $_.Status -eq 'WARNING' }).Count
+    $fOkCount = @($Findings | Where-Object { $_.Status -eq 'OK' }).Count
+    $fInfoCount = @($Findings | Where-Object { $_.Status -eq 'INFO' }).Count
+
+    $html += @"
+        <h2 class="section-title">Security Findings Overview</h2>
+        <div class="framework-grid">
+            <div class="framework-card" style="border-top-color: var(--danger);">
+                <h3>Failures</h3>
+                <div class="source">Require immediate attention</div>
+                <div class="framework-score bad">$fFailCount</div>
+            </div>
+            <div class="framework-card" style="border-top-color: var(--warning);">
+                <h3>Warnings</h3>
+                <div class="source">Recommended improvements</div>
+                <div class="framework-score warn">$fWarnCount</div>
+            </div>
+            <div class="framework-card" style="border-top-color: var(--success);">
+                <h3>Passed</h3>
+                <div class="source">Correctly configured</div>
+                <div class="framework-score good">$fOkCount</div>
+            </div>
+            <div class="framework-card" style="border-top-color: #0078d4;">
+                <h3>Informational</h3>
+                <div class="source">Discovery and inventory</div>
+                <div class="framework-score" style="color: #0078d4;">$fInfoCount</div>
+            </div>
+        </div>
+"@
+
+    # All Assessment Findings table (primary content)
+    if ($Findings -and $Findings.Count -gt 0) {
+        $html += @"
+
+        <h2 class="section-title">All Assessment Findings ($($Findings.Count))</h2>
+        <div class="card">
+            <div class="card-body">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Check</th>
+                            <th>Status</th>
+                            <th>Category</th>
+                            <th>Object</th>
+                            <th>Description</th>
+                            <th>Remediation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+"@
+        $sortedFindings = $Findings | Sort-Object @{Expression = {
+                switch ($_.Status) { 'FAIL' { 0 } 'WARNING' { 1 } 'INFO' { 2 } 'OK' { 3 } default { 4 } }
+            }
+        }
+        foreach ($f in $sortedFindings) {
+            $fStatusBadge = switch ($f.Status) {
+                'FAIL' { '<span class="badge badge-danger">FAIL</span>' }
+                'WARNING' { '<span class="badge badge-warning">WARNING</span>' }
+                'OK' { '<span class="badge badge-success">OK</span>' }
+                default { '<span class="badge" style="background:#e0e0e0;color:#333;">INFO</span>' }
+            }
+            $fCheckName = [System.Net.WebUtility]::HtmlEncode($f.Check)
+            if (-not $fCheckName) { $fCheckName = [System.Net.WebUtility]::HtmlEncode($f.CheckName) }
+            $fCategory = [System.Net.WebUtility]::HtmlEncode($f.Category)
+            $fObj = [System.Net.WebUtility]::HtmlEncode($f.Object)
+            $fDesc = [System.Net.WebUtility]::HtmlEncode($f.Description)
+            $fRem = [System.Net.WebUtility]::HtmlEncode($f.Remediation)
+            $html += @"
+                        <tr>
+                            <td><strong>$fCheckName</strong></td>
+                            <td>$fStatusBadge</td>
+                            <td>$fCategory</td>
+                            <td style="max-width:200px;word-wrap:break-word;">$fObj</td>
+                            <td>$fDesc</td>
+                            <td style="font-size:0.85rem;">$fRem</td>
+                        </tr>
+"@
+        }
+        $html += @"
+                    </tbody>
+                </table>
+            </div>
+        </div>
+"@
+    }
+
+    $html += @"
 
         <h2 class="section-title">Compliance Overview by Framework</h2>
         <div class="framework-grid">
@@ -2416,13 +2586,13 @@ function Export-UnifiedComplianceReport {
 "@
 
     # Top gaps section
-    $topGaps = $unifiedData.AllGaps | Select-Object -First 15
+    $topGaps = $unifiedData.AllGaps
     
     if ($topGaps.Count -gt 0) {
         $html += @"
         
         <h2 class="section-title">Priority Compliance Gaps</h2>
-        <p style="margin-bottom: 20px; color: var(--gray-600);">Top issues requiring attention across all frameworks and sources</p>
+        <p style="margin-bottom: 20px; color: var(--gray-600);">All compliance gaps across frameworks and sources ($($topGaps.Count) total)</p>
 "@
 
         foreach ($gap in $topGaps) {
@@ -2460,7 +2630,7 @@ function Export-UnifiedComplianceReport {
 
     # Data sources summary
     $html += @"
-        
+
         <h2 class="section-title">Data Sources</h2>
         <div class="card">
             <div class="card-body">
@@ -2577,4 +2747,4 @@ Export-ModuleMember -Function @(
 )
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-ComplianceModule
+$null = Initialize-ComplianceModule

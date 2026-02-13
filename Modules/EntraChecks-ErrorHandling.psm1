@@ -102,6 +102,7 @@ function New-CircuitBreaker {
     .PARAMETER SuccessThreshold
         Number of successes in half-open state to close circuit
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -141,6 +142,7 @@ function Test-CircuitBreakerState {
     .SYNOPSIS
         Test if circuit breaker allows operation
     #>
+    [OutputType([bool])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -315,6 +317,7 @@ function Test-RetryableError {
     .PARAMETER Exception
         The exception to analyze
     #>
+    [OutputType([bool])]
     [CmdletBinding()]
     param(
         [System.Management.Automation.ErrorRecord]$ErrorRecord,
@@ -350,6 +353,7 @@ function Get-ErrorCategory {
     .PARAMETER ErrorRecord
         The error record to categorize
     #>
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -386,6 +390,7 @@ function Get-RetryDelay {
     .PARAMETER UseExponentialBackoff
         Use exponential backoff
     #>
+    [OutputType([int])]
     [CmdletBinding()]
     param(
         [int]$Attempt,
@@ -673,9 +678,9 @@ function Invoke-GraphRequestWithRetry {
 
         Invoke-MgGraphRequest @params
     } -MaxRetries $MaxRetries `
-      -ExponentialBackoff `
-      -CircuitBreakerName "GraphAPI" `
-      -Operation $operation
+        -ExponentialBackoff `
+        -CircuitBreakerName "GraphAPI" `
+        -Operation $operation
 
     return $result
 }

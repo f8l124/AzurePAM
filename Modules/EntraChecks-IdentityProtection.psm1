@@ -47,6 +47,7 @@ $script:ModuleName = "EntraChecks-IdentityProtection"
     Called automatically when module is imported.
 #>
 function Initialize-IdentityProtectionModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -126,22 +127,22 @@ function Add-ModuleFinding {
     else {
         # Standalone mode - add to local collection
         $finding = [PSCustomObject]@{
-            Time        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Status      = $Status
-            Object      = $Object
+            Time = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            Status = $Status
+            Object = $Object
             Description = $Description
             Remediation = $Remediation
-            Module      = $script:ModuleName
+            Module = $script:ModuleName
         }
         
         $script:Findings += $finding
         
         # Color-coded console output
         $color = switch ($Status) {
-            "OK"      { "Green" }
-            "INFO"    { "Cyan" }
+            "OK" { "Green" }
+            "INFO" { "Cyan" }
             "WARNING" { "Yellow" }
-            "FAIL"    { "Red" }
+            "FAIL" { "Red" }
         }
         Write-Host "[$Status] $Object" -ForegroundColor $color
     }
@@ -579,8 +580,8 @@ function Test-UserRiskPolicy {
             
             # Check for appropriate controls
             $hasGoodControls = $policy.grantControls.builtInControls -contains "passwordChange" -or 
-                              $policy.grantControls.builtInControls -contains "block" -or
-                              $policy.grantControls.builtInControls -contains "mfa"
+            $policy.grantControls.builtInControls -contains "block" -or
+            $policy.grantControls.builtInControls -contains "mfa"
             
             if ($state -eq "enabled" -and -not $hasGoodControls) {
                 $status = "WARNING"
@@ -590,8 +591,8 @@ function Test-UserRiskPolicy {
                 -Object "User Risk Policy: $($policy.displayName)" `
                 -Description "State: $state. Risk levels: $riskLevels. Controls: $grantControls." `
                 -Remediation $(if ($state -ne "enabled") { "Enable this policy to protect against risky users." } 
-                              elseif (-not $hasGoodControls) { "Add password change or block control for better protection." }
-                              else { "Policy is configured appropriately. Review periodically." })
+                elseif (-not $hasGoodControls) { "Add password change or block control for better protection." }
+                else { "Policy is configured appropriately. Review periodically." })
         }
         
         # Summary findings
@@ -712,7 +713,7 @@ function Test-SignInRiskPolicy {
             
             # Check for appropriate controls
             $hasGoodControls = $policy.grantControls.builtInControls -contains "mfa" -or 
-                              $policy.grantControls.builtInControls -contains "block"
+            $policy.grantControls.builtInControls -contains "block"
             
             if ($state -eq "enabled" -and -not $hasGoodControls) {
                 $status = "WARNING"
@@ -722,8 +723,8 @@ function Test-SignInRiskPolicy {
                 -Object "Sign-In Risk Policy: $($policy.displayName)" `
                 -Description "State: $state. Risk levels: $riskLevels. Controls: $grantControls." `
                 -Remediation $(if ($state -ne "enabled") { "Enable this policy to challenge risky sign-ins." } 
-                              elseif (-not $hasGoodControls) { "Add MFA or block control for better protection." }
-                              else { "Policy is configured appropriately. Review periodically." })
+                elseif (-not $hasGoodControls) { "Add MFA or block control for better protection." }
+                else { "Policy is configured appropriately. Review periodically." })
         }
         
         # Summary findings
@@ -818,13 +819,13 @@ function Test-RiskDetections {
         
         # Analyze by location
         $locations = $riskDetections | Where-Object { $_.location.countryOrRegion } | 
-                     Group-Object -Property { $_.location.countryOrRegion } | 
-                     Sort-Object Count -Descending
+            Group-Object -Property { $_.location.countryOrRegion } | 
+            Sort-Object Count -Descending
         
         # Analyze by IP
         $ipAddresses = $riskDetections | Where-Object { $_.ipAddress } | 
-                       Group-Object -Property ipAddress | 
-                       Sort-Object Count -Descending
+            Group-Object -Property ipAddress | 
+            Sort-Object Count -Descending
         
         # Summary finding
         $topTypes = ($detectionTypes | Select-Object -First 3 | ForEach-Object { "$($_.Name): $($_.Count)" }) -join ", "
@@ -937,7 +938,7 @@ function Test-RiskDetections {
             }
         }
         catch {
-            # Trend analysis failed - not critical
+            Write-Verbose "Trend analysis failed (not critical): $_"
         }
     }
     catch {
@@ -1000,4 +1001,4 @@ Export-ModuleMember -Function @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-IdentityProtectionModule
+$null = Initialize-IdentityProtectionModule

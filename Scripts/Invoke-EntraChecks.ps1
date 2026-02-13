@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Invoke-EntraChecks.ps1
     Comprehensive Microsoft Entra ID Security Check Script
@@ -40,7 +40,8 @@
     Application (client) ID (required for Application auth mode)
 
 .PARAMETER ClientSecret
-    Client secret (for Application auth mode, alternative to ClientCertificate)
+    Client secret as SecureString (for Application auth mode, alternative to ClientCertificate).
+    Create with: $secret = Read-Host -AsSecureString
 
 .PARAMETER ClientCertificateThumbprint
     Certificate thumbprint (for Application auth mode, alternative to ClientSecret)
@@ -75,8 +76,9 @@
     
 .EXAMPLE
     # Application authentication with client secret
+    $secret = ConvertTo-SecureString "your-secret" -AsPlainText -Force
     .\Invoke-EntraChecks.ps1 -AuthMode Application -TenantId "contoso.onmicrosoft.com" `
-        -ClientId "00000000-0000-0000-0000-000000000000" -ClientSecret "your-secret"
+        -ClientId "00000000-0000-0000-0000-000000000000" -ClientSecret $secret
 
 .EXAMPLE
     # Non-interactive with all output formats
@@ -126,7 +128,7 @@ param(
     
     [string]$TenantId,
     [string]$ClientId,
-    [string]$ClientSecret,
+    [SecureString]$ClientSecret,
     [string]$ClientCertificateThumbprint,
     
     # Phase A Enhancement Parameters
@@ -168,7 +170,7 @@ if (Test-Path $loggingModule) {
     # Initialize logging subsystem
     $logDir = Join-Path $ReportDir "Logs"
     $logLevel = if ($NonInteractive) { 'INFO' } else { 'DEBUG' }
-    Initialize-LoggingSubsystem -LogDirectory $logDir -MinimumLevel $logLevel -RetentionDays 90 -StructuredLogging
+    Initialize-LoggingSubsystem -LogDirectory $logDir -MinimumLevel $logLevel -RetentionDays 90 -StructuredLogging | Out-Null
 
     Write-Log -Level INFO -Message "EntraChecks assessment started" -Category "System" -Properties @{
         Version = "1.5.0"
@@ -181,14 +183,220 @@ if (Test-Path $loggingModule) {
     }
 }
 
-# Start transcript as fallback
-Start-Transcript $LogFile -ErrorAction SilentlyContinue
+# Start transcript as fallback (suppress output to avoid polluting stream)
+Start-Transcript $LogFile -ErrorAction SilentlyContinue | Out-Null
 
 # Initialize findings collection
 $script:Findings = @()
 
 # Previous assessment data (for comparison)
 $script:PreviousFindings = $null
+
+# Mapping from check function names to risk/compliance type keys
+# These keys match the BaseRiskScores table in EntraChecks-RiskScoring.psm1
+# and the framework mapping tables in EntraChecks-ComplianceMapping.psm1
+$script:CheckNameToType = @{}
+$script:CheckNameToType['Check-ConditionalAccessPolicies'] = 'ConditionalAccess_Missing'
+$script:CheckNameToType['Check-PasswordNeverExpires'] = 'PasswordExpiry_Disabled'
+$script:CheckNameToType['Check-DirectoryRolesAndMembers'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-PrivilegedRoleCreep'] = 'GlobalAdmin_Multiple'
+$script:CheckNameToType['Check-RecentPrivilegedAccounts'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-UserAccountsAndInactivity'] = 'PasswordPolicy_Weak'
+$script:CheckNameToType['Check-GuestUsers'] = 'GuestAccess_Unrestricted'
+$script:CheckNameToType['Check-PasswordsInProfileFields'] = 'PasswordPolicy_Weak'
+$script:CheckNameToType['Check-ShadowGroups'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-RoleAssignableGroupOwnership'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-ApplicationCredentials'] = 'AppPermissions_Excessive'
+$script:CheckNameToType['Check-ServicePrincipalPermissions'] = 'AppPermissions_Excessive'
+$script:CheckNameToType['Check-OAuthConsentGrants'] = 'AppConsent_UserAllowed'
+$script:CheckNameToType['Check-AppRoleAssignments'] = 'AppPermissions_Excessive'
+$script:CheckNameToType['Check-DuplicateAppIdentifiers'] = 'AppPermissions_Excessive'
+$script:CheckNameToType['Check-AuthenticationMethodsPolicy'] = 'MFA_Disabled'
+$script:CheckNameToType['Check-PrivilegedUserMFACoverage'] = 'MFA_AdminDisabled'
+$script:CheckNameToType['Check-CrossTenantAccessPolicy'] = 'GuestAccess_Unrestricted'
+$script:CheckNameToType['Check-AuthorizationPolicy'] = 'SecurityDefaults_Disabled'
+$script:CheckNameToType['Check-AdminUnitDelegation'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-PIMConfiguration'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-AuditLogRetention'] = 'AuditLog_NotEnabled'
+$script:CheckNameToType['Check-DirectoryRoleAssignmentPaths'] = 'AdminRoles_Excessive'
+$script:CheckNameToType['Check-NamedLocations'] = 'ConditionalAccess_Missing'
+$script:CheckNameToType['Check-TenantAndDomainInfo'] = 'Default'
+
+#region ==================== ERROR KNOWLEDGE BASE ====================
+# Maps error patterns to meaningful codes, causes, and resolutions
+# Used by Write-CheckError to classify errors for analyst-friendly logging
+$script:ErrorKnowledge = @{}
+$entry = @{}
+$entry['Pattern'] = 'AADSTS|authentication failed|token.*expir|login required|InteractiveBrowser'
+$entry['Cause'] = 'Authentication session expired or failed'
+$entry['Resolution'] = 'Re-run the script and sign in again. If using scheduled mode, check service principal credentials.'
+$script:ErrorKnowledge['EC-AUTH'] = $entry
+$entry = @{}
+$entry['Pattern'] = 'Forbidden|403|Insufficient privileges|Authorization_RequestDenied|insufficient.*scope'
+$entry['Cause'] = 'Missing Graph API permissions'
+$entry['Resolution'] = 'Have a Global Admin run .\Grant-AdminConsent.ps1 to grant required scopes, or sign in with Global Reader role.'
+$script:ErrorKnowledge['EC-PERM'] = $entry
+$entry = @{}
+$entry['Pattern'] = 'Premium|P2.*required|license.*required|IdentityProtection|AAD_Premium'
+$entry['Cause'] = 'Requires Azure AD Premium P2 license'
+$entry['Resolution'] = 'This check requires an Azure AD Premium P2 license. Skip it with -ExcludeChecks or upgrade your license.'
+$script:ErrorKnowledge['EC-LIC'] = $entry
+$entry = @{}
+$entry['Pattern'] = '429|throttl|Too Many Requests|rate.*limit'
+$entry['Cause'] = 'Graph API rate limiting'
+$entry['Resolution'] = 'Too many API requests. Wait a few minutes and re-run, or run fewer modules at once.'
+$script:ErrorKnowledge['EC-THROT'] = $entry
+$entry = @{}
+$entry['Pattern'] = 'Not connected|no.*graph.*session|Connect-MgGraph|network|timeout|socket'
+$entry['Cause'] = 'Graph/Azure connection lost'
+$entry['Resolution'] = 'Network issue or session timeout. Check connectivity and re-run the script.'
+$script:ErrorKnowledge['EC-CONN'] = $entry
+$entry = @{}
+$entry['Pattern'] = '404|Not Found|does not exist|resource.*not.*found'
+$entry['Cause'] = 'Requested resource not found'
+$entry['Resolution'] = 'The API endpoint or resource does not exist in this tenant. This may be expected if the feature is not configured.'
+$script:ErrorKnowledge['EC-NOTFOUND'] = $entry
+$entry = @{}
+$entry['Pattern'] = 'Azure\.Identity\.Broker|WAM|Az\.Accounts|AzContext|subscription'
+$entry['Cause'] = 'Azure module or authentication issue'
+$entry['Resolution'] = 'Check Az module installation (Install-Module Az.Accounts). If WAM errors persist, restart PowerShell.'
+$script:ErrorKnowledge['EC-AZ'] = $entry
+$entry = @{}
+$entry['Pattern'] = 'not recognized|CommandNotFound|Import-Module|module.*not.*found'
+$entry['Cause'] = 'Required PowerShell module not installed'
+$entry['Resolution'] = 'Run .\Install-Prerequisites.ps1 to install all required modules.'
+$script:ErrorKnowledge['EC-MOD'] = $entry
+
+# Collects errors during the run for the end-of-run summary
+$script:ErrorSummary = [System.Collections.ArrayList]::new()
+
+function Write-CheckError {
+    <#
+    .SYNOPSIS
+        Logs a check/module error with classification, writes to log file, and tracks for summary.
+    .DESCRIPTION
+        Matches the error against the ErrorKnowledge base to assign a meaningful error code,
+        cause, and resolution. Logs to the structured log file via Write-Log, writes to the
+        console for real-time visibility, and adds to ErrorSummary for the end-of-run report.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$CheckName,
+
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+
+        [string]$Category = "CheckExecution"
+    )
+
+    # Match error against knowledge base
+    $errorCode = 'EC-UNKNOWN'
+    $cause = 'Unexpected error'
+    $resolution = 'Check the log file for full error details and contact the administrator.'
+    $errorText = if ($ErrorRecord) { $ErrorRecord.Exception.Message } else { $Message }
+
+    foreach ($code in $script:ErrorKnowledge.Keys) {
+        $entry = $script:ErrorKnowledge[$code]
+        if ($errorText -match $entry.Pattern) {
+            $errorCode = $code
+            $cause = $entry.Cause
+            $resolution = $entry.Resolution
+            break
+        }
+    }
+
+    # Log to structured log file (persistent)
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        $logProps = @{}
+        $logProps['ErrorCode'] = $errorCode
+        $logProps['CheckName'] = $CheckName
+        $logProps['Cause'] = $cause
+        $logProps['Resolution'] = $resolution
+        Write-Log -Level ERROR -Message "[$errorCode] $CheckName - $Message" `
+            -Category $Category `
+            -ErrorRecord $ErrorRecord `
+            -Properties $logProps
+    }
+
+    # Write to console (real-time visibility for analyst)
+    Write-Host "[!] [$errorCode] $CheckName : $Message" -ForegroundColor Red
+    Write-Host "    Cause: $cause" -ForegroundColor DarkYellow
+    Write-Host "    Fix: $resolution" -ForegroundColor DarkGray
+
+    # Track for end-of-run summary
+    $errorEntry = New-Object PSObject
+    $errorEntry | Add-Member -NotePropertyName Time -NotePropertyValue (Get-Date)
+    $errorEntry | Add-Member -NotePropertyName ErrorCode -NotePropertyValue $errorCode
+    $errorEntry | Add-Member -NotePropertyName CheckName -NotePropertyValue $CheckName
+    $errorEntry | Add-Member -NotePropertyName Message -NotePropertyValue $Message
+    $errorEntry | Add-Member -NotePropertyName Cause -NotePropertyValue $cause
+    $errorEntry | Add-Member -NotePropertyName Resolution -NotePropertyValue $resolution
+    $exceptionMsg = if ($ErrorRecord) { $ErrorRecord.Exception.Message } else { $null }
+    $errorEntry | Add-Member -NotePropertyName Exception -NotePropertyValue $exceptionMsg
+    $null = $script:ErrorSummary.Add($errorEntry)
+}
+
+function Show-ErrorSummary {
+    <#
+    .SYNOPSIS
+        Displays a grouped error summary at the end of the assessment run.
+    #>
+    if ($script:ErrorSummary.Count -eq 0) {
+        Write-Host "`n[OK] Assessment completed with no errors." -ForegroundColor Green
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log -Level INFO -Message "Assessment completed with no errors" -Category "Summary"
+        }
+        return
+    }
+
+    $grouped = $script:ErrorSummary | Group-Object -Property ErrorCode
+
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "  ASSESSMENT ERROR SUMMARY" -ForegroundColor Yellow
+    Write-Host "  $($script:ErrorSummary.Count) error(s) during execution" -ForegroundColor Yellow
+    Write-Host "========================================" -ForegroundColor Yellow
+
+    foreach ($group in $grouped) {
+        $code = $group.Name
+        $items = $group.Group
+        $cause = $items[0].Cause
+        $resolution = $items[0].Resolution
+
+        Write-Host "`n  [$code] $cause ($($items.Count)x)" -ForegroundColor Red
+        foreach ($item in $items) {
+            Write-Host "    - $($item.CheckName): $($item.Message)" -ForegroundColor DarkGray
+        }
+        Write-Host "    Fix: $resolution" -ForegroundColor DarkYellow
+    }
+
+    # Show log file path
+    $logPath = $null
+    if (Get-Command Get-LogFilePath -ErrorAction SilentlyContinue) {
+        $logPath = Get-LogFilePath
+    }
+    if ($logPath) {
+        Write-Host "`n  Full error log: $logPath" -ForegroundColor Cyan
+    }
+    else {
+        Write-Host "`n  Check .\Logs\ folder for detailed error logs." -ForegroundColor Cyan
+    }
+    Write-Host "========================================" -ForegroundColor Yellow
+
+    # Log the summary itself
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        $summaryText = ($grouped | ForEach-Object { "[$($_.Name)] $($_.Count)x: $($_.Group[0].Cause)" }) -join '; '
+        $summaryProps = @{}
+        $summaryProps['TotalErrors'] = $script:ErrorSummary.Count
+        $summaryProps['ErrorCodes'] = ($grouped | ForEach-Object { $_.Name }) -join ','
+        Write-Log -Level WARN -Message "Assessment completed with $($script:ErrorSummary.Count) error(s): $summaryText" `
+            -Category "Summary" `
+            -Properties $summaryProps
+    }
+}
+#endregion
 
 # Configuration from file
 $script:Config = $null
@@ -307,10 +515,25 @@ function Add-Finding {
         [string]$Remediation = "Review and address as appropriate."
     )
 
+    # Auto-capture calling function name for CIS/NIST compliance mapping
+    $callerName = (Get-PSCallStack)[1].FunctionName
+    # Normalize Test- prefix to Check- for compatibility with MappedChecks arrays
+    $checkName = $callerName -replace '^Test-', 'Check-'
+
+    # Resolve finding type for risk scoring and compliance framework mapping
+    $findingType = if ($script:CheckNameToType.ContainsKey($checkName)) {
+        $script:CheckNameToType[$checkName]
+    }
+    else {
+        'Default'
+    }
+
     $finding = [PSCustomObject]@{
-        Time        = (Get-Date)
-        Status      = $Status
-        Object      = $Object
+        Time = (Get-Date)
+        CheckName = $checkName
+        Type = $findingType
+        Status = $Status
+        Object = $Object
         Description = $Description
         Remediation = $Remediation
     }
@@ -319,10 +542,10 @@ function Add-Finding {
 
     # Log the finding
     $logLevel = switch ($Status) {
-        "OK"      { "INFO" }
-        "INFO"    { "INFO" }
+        "OK" { "INFO" }
+        "INFO" { "INFO" }
         "WARNING" { "WARN" }
-        "FAIL"    { "ERROR" }
+        "FAIL" { "ERROR" }
     }
 
     if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
@@ -334,18 +557,26 @@ function Add-Finding {
 
         # Write audit log for FAIL and WARNING findings
         if ($Status -in @('FAIL', 'WARNING')) {
-            Write-AuditLog -EventType "FindingDetected" -Description $Description -TargetObject $Object -Result $Status
+            $auditResult = if ($Status -eq 'FAIL') { 'Failure' } else { 'Warning' }
+            Write-AuditLog -EventType "FindingDetected" -Description $Description -TargetObject $Object -Result $auditResult
         }
     }
 
     # Also write to console with color coding
     $color = switch ($Status) {
-        "OK"      { "Green" }
-        "INFO"    { "Cyan" }
+        "OK" { "Green" }
+        "INFO" { "Cyan" }
         "WARNING" { "Yellow" }
-        "FAIL"    { "Red" }
+        "FAIL" { "Red" }
     }
     Write-Host "[$Status] $Object" -ForegroundColor $color
+}
+
+# Remove the Microsoft.Graph.Authentication alias 'Invoke-GraphRequest' which conflicts
+# with our custom function below. The alias points to Invoke-MgGraphRequest which does
+# NOT have an -AllPages parameter, causing all checks to fail.
+if (Get-Alias Invoke-GraphRequest -ErrorAction SilentlyContinue) {
+    Remove-Item alias:Invoke-GraphRequest -Force -ErrorAction SilentlyContinue
 }
 
 <#
@@ -420,7 +651,17 @@ function Invoke-GraphRequest {
 #>
 function Connect-EntraChecks {
     Write-Host "`n[*] Connecting to Microsoft Graph..." -ForegroundColor Cyan
-    
+
+    # Check if already connected (e.g. when called from Start-EntraChecks.ps1 which authenticates first)
+    $existingContext = Get-MgContext -ErrorAction SilentlyContinue
+    if ($existingContext) {
+        Write-Host "[+] Already connected to Microsoft Graph" -ForegroundColor Green
+        Write-Host "    Account: $($existingContext.Account)" -ForegroundColor Gray
+        Write-Host "    Tenant ID: $($existingContext.TenantId)" -ForegroundColor Gray
+        $script:TenantCapabilities.TenantId = $existingContext.TenantId
+        return $true
+    }
+
     # Check if Microsoft.Graph module is installed
     if (!(Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
         Write-Host "[!] Microsoft.Graph module not found. Installing..." -ForegroundColor Yellow
@@ -435,7 +676,13 @@ function Connect-EntraChecks {
     
     # Import required modules
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-    
+
+    # Remove the alias that Microsoft.Graph.Authentication creates (Invoke-GraphRequest -> Invoke-MgGraphRequest)
+    # This alias shadows our custom Invoke-GraphRequest function which supports -AllPages pagination
+    if (Get-Alias Invoke-GraphRequest -ErrorAction SilentlyContinue) {
+        Remove-Item alias:Invoke-GraphRequest -Force -ErrorAction SilentlyContinue
+    }
+
     # Define required scopes
     $requiredScopes = @(
         "Directory.Read.All",
@@ -470,8 +717,7 @@ function Connect-EntraChecks {
             
             if ($ClientSecret) {
                 # Client secret authentication
-                $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-                $credential = New-Object System.Management.Automation.PSCredential($ClientId, $secureSecret)
+                $credential = New-Object System.Management.Automation.PSCredential($ClientId, $ClientSecret)
                 Connect-MgGraph -TenantId $TenantId -ClientSecretCredential $credential -NoWelcome
             }
             elseif ($ClientCertificateThumbprint) {
@@ -1955,7 +2201,7 @@ function Test-ServicePrincipalPermissions {
     try {
         # Get all service principals (enterprise applications)
         $servicePrincipals = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$select=id,appId,displayName,servicePrincipalType,appOwnerOrganizationId,accountEnabled&`$top=999" -AllPages
-        
+
         if (-not $servicePrincipals -or $servicePrincipals.Count -eq 0) {
             Add-Finding -Status "INFO" `
                 -Object "Service Principals" `
@@ -1963,65 +2209,143 @@ function Test-ServicePrincipalPermissions {
                 -Remediation "No action needed."
             return
         }
-        
+
         # Get tenant ID for comparison
         $tenantId = $script:TenantCapabilities.TenantId
-        
+
         $totalSPs = $servicePrincipals.Count
         $thirdPartySPs = 0
         $highRiskSPs = 0
-        
-        foreach ($sp in $servicePrincipals) {
-            # Skip disabled service principals
-            if ($sp.accountEnabled -eq $false) { continue }
-            
-            # Determine if third-party
+
+        # Cache for resource SP lookups - most assignments point to the same resource
+        # (e.g., Microsoft Graph), so caching avoids thousands of redundant API calls
+        $resourceSPCache = @{}
+
+        # Filter to enabled SPs only and count third-party up front
+        $enabledSPs = @($servicePrincipals | Where-Object { $_.accountEnabled -ne $false })
+        foreach ($sp in $enabledSPs) {
             $isThirdParty = $sp.appOwnerOrganizationId -and $sp.appOwnerOrganizationId -ne $tenantId
             $isMicrosoft = $microsoftAppIds -contains $sp.appId
-            
             if ($isThirdParty -and -not $isMicrosoft) {
                 $thirdPartySPs++
             }
-            
-            # Get app role assignments (application permissions)
-            try {
-                $appRoleAssignments = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments" -AllPages
-                
-                if ($appRoleAssignments -and $appRoleAssignments.Count -gt 0) {
-                    $dangerousPermissions = @()
-                    
-                    foreach ($assignment in $appRoleAssignments) {
-                        # Get the resource service principal to understand the permission
-                        $resourceSP = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($assignment.resourceId)?`$select=id,displayName,appRoles"
-                        
-                        if ($resourceSP -and $resourceSP.appRoles) {
-                            $appRole = $resourceSP.appRoles | Where-Object { $_.id -eq $assignment.appRoleId }
-                            
-                            if ($appRole) {
-                                $permissionName = $appRole.value
-                                
-                                # Check if this is a high-risk permission
-                                if ($highRiskPermissions.ContainsKey($permissionName)) {
-                                    $dangerousPermissions += "$permissionName ($($highRiskPermissions[$permissionName]))"
+        }
+
+        # Batch-fetch all appRoleAssignments in one call instead of per-SP
+        # This returns all assignments across the tenant in a single paginated request
+        $allAssignments = $null
+        try {
+            $allAssignments = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$select=id,appId,displayName,appOwnerOrganizationId,accountEnabled&`$expand=appRoleAssignments&`$top=999" -AllPages
+        }
+        catch {
+            Write-Verbose "Batch expand query not supported, falling back to per-SP queries: $($_.Exception.Message)"
+            $allAssignments = $null
+        }
+
+        if ($allAssignments) {
+            # Fast path: expanded query returned assignments inline
+            foreach ($sp in $allAssignments) {
+                if ($sp.accountEnabled -eq $false) { continue }
+                if (-not $sp.appRoleAssignments -or $sp.appRoleAssignments.Count -eq 0) { continue }
+
+                $isThirdParty = $sp.appOwnerOrganizationId -and $sp.appOwnerOrganizationId -ne $tenantId
+                $isMicrosoft = $microsoftAppIds -contains $sp.appId
+
+                $dangerousPermissions = @()
+                foreach ($assignment in $sp.appRoleAssignments) {
+                    $resourceSP = $null
+                    if ($resourceSPCache.ContainsKey($assignment.resourceId)) {
+                        $resourceSP = $resourceSPCache[$assignment.resourceId]
+                    }
+                    else {
+                        try {
+                            $resourceSP = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($assignment.resourceId)?`$select=id,displayName,appRoles"
+                            $resourceSPCache[$assignment.resourceId] = $resourceSP
+                        }
+                        catch {
+                            Write-Verbose "Could not resolve resource SP '$($assignment.resourceId)': $($_.Exception.Message)"
+                            $resourceSPCache[$assignment.resourceId] = $null
+                        }
+                    }
+
+                    if ($resourceSP -and $resourceSP.appRoles) {
+                        $appRole = $resourceSP.appRoles | Where-Object { $_.id -eq $assignment.appRoleId }
+                        if ($appRole -and $highRiskPermissions.ContainsKey($appRole.value)) {
+                            $dangerousPermissions += "$($appRole.value) ($($highRiskPermissions[$appRole.value]))"
+                        }
+                    }
+                }
+
+                if ($dangerousPermissions.Count -gt 0) {
+                    $highRiskSPs++
+                    $severity = if ($dangerousPermissions -match "RoleManagement|Directory.ReadWrite|AppRoleAssignment") { "FAIL" } else { "WARNING" }
+                    $partyType = if ($isThirdParty -and -not $isMicrosoft) { "THIRD-PARTY" } elseif ($isMicrosoft) { "Microsoft" } else { "First-party" }
+
+                    Add-Finding -Status $severity `
+                        -Object "$($sp.displayName) [$partyType]" `
+                        -Description "Service principal '$($sp.displayName)' has high-risk permissions: $($dangerousPermissions -join '; ')" `
+                        -Remediation "Review if this application truly requires these permissions. Apply principle of least privilege. Third-party apps with these permissions are especially risky."
+                }
+            }
+        }
+        else {
+            # Fallback path: per-SP queries with resource SP caching
+            $spCount = 0
+            foreach ($sp in $enabledSPs) {
+                $spCount++
+                if ($spCount % 100 -eq 0) {
+                    Write-Host "    Processing service principal $spCount of $($enabledSPs.Count)..." -ForegroundColor DarkGray
+                }
+
+                $isThirdParty = $sp.appOwnerOrganizationId -and $sp.appOwnerOrganizationId -ne $tenantId
+                $isMicrosoft = $microsoftAppIds -contains $sp.appId
+
+                try {
+                    $appRoleAssignments = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments" -AllPages
+
+                    if ($appRoleAssignments -and $appRoleAssignments.Count -gt 0) {
+                        $dangerousPermissions = @()
+
+                        foreach ($assignment in $appRoleAssignments) {
+                            # Use cached resource SP lookup to avoid redundant API calls
+                            $resourceSP = $null
+                            if ($resourceSPCache.ContainsKey($assignment.resourceId)) {
+                                $resourceSP = $resourceSPCache[$assignment.resourceId]
+                            }
+                            else {
+                                try {
+                                    $resourceSP = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($assignment.resourceId)?`$select=id,displayName,appRoles"
+                                    $resourceSPCache[$assignment.resourceId] = $resourceSP
+                                }
+                                catch {
+                                    Write-Verbose "Could not resolve resource SP '$($assignment.resourceId)': $($_.Exception.Message)"
+                                    $resourceSPCache[$assignment.resourceId] = $null
+                                }
+                            }
+
+                            if ($resourceSP -and $resourceSP.appRoles) {
+                                $appRole = $resourceSP.appRoles | Where-Object { $_.id -eq $assignment.appRoleId }
+                                if ($appRole -and $highRiskPermissions.ContainsKey($appRole.value)) {
+                                    $dangerousPermissions += "$($appRole.value) ($($highRiskPermissions[$appRole.value]))"
                                 }
                             }
                         }
-                    }
-                    
-                    if ($dangerousPermissions.Count -gt 0) {
-                        $highRiskSPs++
-                        $severity = if ($dangerousPermissions -match "RoleManagement|Directory.ReadWrite|AppRoleAssignment") { "FAIL" } else { "WARNING" }
-                        $partyType = if ($isThirdParty -and -not $isMicrosoft) { "THIRD-PARTY" } elseif ($isMicrosoft) { "Microsoft" } else { "First-party" }
-                        
-                        Add-Finding -Status $severity `
-                            -Object "$($sp.displayName) [$partyType]" `
-                            -Description "Service principal '$($sp.displayName)' has high-risk permissions: $($dangerousPermissions -join '; ')" `
-                            -Remediation "Review if this application truly requires these permissions. Apply principle of least privilege. Third-party apps with these permissions are especially risky."
+
+                        if ($dangerousPermissions.Count -gt 0) {
+                            $highRiskSPs++
+                            $severity = if ($dangerousPermissions -match "RoleManagement|Directory.ReadWrite|AppRoleAssignment") { "FAIL" } else { "WARNING" }
+                            $partyType = if ($isThirdParty -and -not $isMicrosoft) { "THIRD-PARTY" } elseif ($isMicrosoft) { "Microsoft" } else { "First-party" }
+
+                            Add-Finding -Status $severity `
+                                -Object "$($sp.displayName) [$partyType]" `
+                                -Description "Service principal '$($sp.displayName)' has high-risk permissions: $($dangerousPermissions -join '; ')" `
+                                -Remediation "Review if this application truly requires these permissions. Apply principle of least privilege. Third-party apps with these permissions are especially risky."
+                        }
                     }
                 }
-            }
-            catch {
-                # May fail due to permissions, continue with other SPs
+                catch {
+                    Write-Verbose "Could not query appRoleAssignments for SP '$($sp.displayName)': $($_.Exception.Message)"
+                }
             }
         }
         
@@ -2847,26 +3171,80 @@ function Test-PrivilegedUserMFACoverage {
             return
         }
         
-        # Try to get MFA registration details (may require additional permissions)
+        # Try to get MFA registration details
         $usersWithoutMFA = @()
         $usersWithWeakMFA = @()
         $usersWithStrongMFA = @()
-        
+
+        # First try the userRegistrationDetails endpoint (most reliable, requires AuditLog.Read.All)
+        $registrationDetails = @{}
+        $useRegistrationApi = $false
+        try {
+            $regData = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/reports/authenticationMethods/userRegistrationDetails" -AllPages
+            if ($regData) {
+                foreach ($reg in $regData) {
+                    if ($reg.id) {
+                        $registrationDetails[$reg.id] = $reg
+                    }
+                }
+                $useRegistrationApi = $true
+                Write-Host "    [i] Using userRegistrationDetails API for MFA status" -ForegroundColor Gray
+            }
+        }
+        catch {
+            Write-Verbose "userRegistrationDetails not available: $($_.Exception.Message). Falling back to per-user method check."
+        }
+
         $strongMethods = @("fido2", "microsoftAuthenticator", "windowsHelloForBusiness", "softwareOath")
         $weakMethods = @("mobilePhone", "alternateMobilePhone", "email")
-        
+
         foreach ($userId in $privilegedUsers.Keys) {
             $user = $privilegedUsers[$userId]
-            
+
+            # Method 1: Use registration details API (preferred - more accurate)
+            if ($useRegistrationApi -and $registrationDetails.ContainsKey($userId)) {
+                $regDetail = $registrationDetails[$userId]
+                $isMfaRegistered = $regDetail.isMfaRegistered
+                $isMfaCapable = $regDetail.isMfaCapable
+                $methodsRegistered = @($regDetail.methodsRegistered)
+
+                if ($isMfaRegistered -or $isMfaCapable) {
+                    # Check method strength
+                    $hasStrong = $false
+                    foreach ($m in $methodsRegistered) {
+                        if ($m -in @("fido2", "microsoftAuthenticator", "windowsHelloForBusiness", "softwareOath", "passKeyDeviceBound", "passKeyDeviceBoundAuthenticator")) {
+                            $hasStrong = $true
+                            break
+                        }
+                    }
+                    if ($hasStrong) {
+                        $usersWithStrongMFA += @{
+                            User = $user
+                            Methods = $methodsRegistered
+                        }
+                    }
+                    else {
+                        $usersWithWeakMFA += @{
+                            User = $user
+                            Methods = $methodsRegistered
+                        }
+                    }
+                }
+                else {
+                    $usersWithoutMFA += $user
+                }
+                continue
+            }
+
+            # Method 2: Fall back to per-user authentication methods endpoint
             try {
-                # Get user's authentication methods
                 $methods = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users/$userId/authentication/methods" -AllPages
-                
+
                 if (-not $methods -or $methods.Count -eq 0) {
                     $usersWithoutMFA += $user
                     continue
                 }
-                
+
                 # Analyze methods
                 $userStrongMethods = @()
                 $userWeakMethods = @()
@@ -2877,16 +3255,19 @@ function Test-PrivilegedUserMFACoverage {
                     if ($methodType -eq "password") {
                         continue  # Password doesn't count as MFA
                     }
-                    
+
                     if ($strongMethods -contains $methodType) {
                         $userStrongMethods += $methodType
                     }
                     elseif ($weakMethods -contains $methodType -or $methodType -eq "phone") {
                         $userWeakMethods += $methodType
                     }
+                    else {
+                        # Unknown method type - treat as weak MFA (at least it's something)
+                        $userWeakMethods += $methodType
+                    }
                 }
-                
-                # User has no MFA if only password is registered
+
                 if ($userStrongMethods.Count -eq 0 -and $userWeakMethods.Count -eq 0) {
                     $usersWithoutMFA += $user
                 }
@@ -2904,7 +3285,6 @@ function Test-PrivilegedUserMFACoverage {
                 }
             }
             catch {
-                # May fail due to permissions, track as unknown
                 Add-Finding -Status "WARNING" `
                     -Object $user.UPN `
                     -Description "Unable to retrieve MFA methods for privileged user '$($user.DisplayName)' ($($user.UPN)). Roles: $($user.Roles -join ', ')" `
@@ -2997,7 +3377,7 @@ function Test-CrossTenantAccessPolicy {
             $partners = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/policies/crossTenantAccessPolicy/partners" -AllPages
         }
         catch {
-            # May not have any partner configurations
+            Write-Verbose "No partner configurations found or access denied: $_"
         }
         
         # Analyze default inbound settings (how external users access this tenant)
@@ -3365,15 +3745,15 @@ function Test-AdminUnitDelegation {
                             $role = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/directoryRoles/$($assignment.roleId)?`$select=displayName"
                             if ($role) { $roleName = $role.displayName }
                         }
-                        catch { }
-                        
+                        catch { Write-Verbose "Could not resolve role name: $_" }
+
                         # Get member info
                         $memberName = "Unknown"
                         try {
                             $member = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/directoryObjects/$($assignment.roleMemberInfo.id)?`$select=displayName"
                             if ($member) { $memberName = $member.displayName }
                         }
-                        catch { }
+                        catch { Write-Verbose "Could not resolve member name: $_" }
                         
                         $roleAssignments += "$memberName ($roleName)"
                     }
@@ -3385,7 +3765,7 @@ function Test-AdminUnitDelegation {
                 }
             }
             catch {
-                # May fail due to permissions
+                Write-Verbose "Could not query AU scoped role members: $_"
             }
         }
         
@@ -3535,7 +3915,7 @@ function Test-PIMConfiguration {
             }
         }
         catch {
-            # Policies endpoint may require additional permissions
+            Write-Verbose "PIM policies endpoint not accessible: $_"
         }
     }
     catch {
@@ -3594,7 +3974,7 @@ function Test-AuditLogRetention {
             }
         }
         catch {
-            # Sign-in logs not available (likely no P1)
+            Write-Verbose "Sign-in logs not available (likely no P1 license): $_"
         }
         
         # Test audit/directory logs
@@ -3611,7 +3991,7 @@ function Test-AuditLogRetention {
             }
         }
         catch {
-            # Audit logs not available
+            Write-Verbose "Audit logs not available: $_"
         }
         
         # Report sign-in log status
@@ -3848,7 +4228,7 @@ function Test-DirectoryRoleAssignmentPaths {
 
 <#
 .SYNOPSIS
-    Test-NamedLocations - Audits named locations configuration for Conditional Access.
+    Test-NamedLocation - Audits named locations configuration for Conditional Access.
 
 .DESCRIPTION
     Examines named locations used in Conditional Access:
@@ -3870,7 +4250,7 @@ function Test-DirectoryRoleAssignmentPaths {
 .LINK
     Graph Reference: https://learn.microsoft.com/en-us/graph/api/conditionalaccessroot-list-namedlocations
 #>
-function Test-NamedLocations {
+function Test-NamedLocation {
     Write-Host "`n[+] Checking named locations configuration..." -ForegroundColor Cyan
     
     # Check if CA is available
@@ -3998,7 +4378,7 @@ function Test-NamedLocations {
     Generates formatted reports from the collected findings.
     Creates both CSV (for data processing) and HTML (for readability) versions.
 #>
-function Export-Findings {
+function Export-Finding {
     param(
         [string]$CheckName = "AllChecks"
     )
@@ -4131,9 +4511,9 @@ $comparisonHtml
                 ForEach-Object {
                     # Add CSS classes for status coloring
                     $_ -replace '<td>OK</td>', '<td class="OK">OK</td>' `
-                       -replace '<td>INFO</td>', '<td class="INFO">INFO</td>' `
-                       -replace '<td>WARNING</td>', '<td class="WARNING">WARNING</td>' `
-                       -replace '<td>FAIL</td>', '<td class="FAIL">FAIL</td>'
+                        -replace '<td>INFO</td>', '<td class="INFO">INFO</td>' `
+                        -replace '<td>WARNING</td>', '<td class="WARNING">WARNING</td>' `
+                        -replace '<td>FAIL</td>', '<td class="FAIL">FAIL</td>'
                 } |
                 Set-Content -Path $ExportHtml
             
@@ -4145,9 +4525,9 @@ $comparisonHtml
     else {
         # Create empty reports
         $dummy = [PSCustomObject]@{
-            Time        = ''
-            Status      = ''
-            Object      = ''
+            Time = ''
+            Status = ''
+            Object = ''
             Description = 'No findings for this run.'
             Remediation = ''
         }
@@ -4185,7 +4565,7 @@ $comparisonHtml
 .SYNOPSIS
     Displays organizational/process recommendations based on findings.
 #>
-function Show-Recommendations {
+function Show-Recommendation {
     Write-Host "`n[+] Organizational/Process Recommendations:" -ForegroundColor Yellow
     
     $RecSet = @{}
@@ -4388,7 +4768,7 @@ function Show-Recommendations {
     for each finding. The script is not executable by default - it
     requires manual review and uncommenting of desired actions.
 #>
-function Generate-RemediationScript {
+function New-RemediationScript {
     $remediationPath = Join-Path $ReportDir "EntraChecks-Remediation-$script:TimeVal.ps1"
     
     $scriptContent = @"
@@ -4708,37 +5088,37 @@ function Show-Comparison {
 
 # Define available checks
 $script:MenuChecks = @(
-    @{ Name = "Run ALL Checks";                      Func = "ALL" }
+    @{ Name = "Run ALL Checks"; Func = "ALL" }
     # --- Phase 1: Foundation ---
-    @{ Name = "Check Tenant and Domain Info";        Func = "Test-TenantAndDomainInfo" }
-    @{ Name = "Check Password Never Expires";        Func = "Test-PasswordNeverExpires" }
-    @{ Name = "Check Directory Roles and Members";   Func = "Test-DirectoryRolesAndMembers" }
-    @{ Name = "Check Privileged Role Creep";         Func = "Test-PrivilegedRoleCreep" }
-    @{ Name = "Check Recent Privileged Accounts";    Func = "Test-RecentPrivilegedAccounts" }
+    @{ Name = "Check Tenant and Domain Info"; Func = "Test-TenantAndDomainInfo" }
+    @{ Name = "Check Password Never Expires"; Func = "Test-PasswordNeverExpires" }
+    @{ Name = "Check Directory Roles and Members"; Func = "Test-DirectoryRolesAndMembers" }
+    @{ Name = "Check Privileged Role Creep"; Func = "Test-PrivilegedRoleCreep" }
+    @{ Name = "Check Recent Privileged Accounts"; Func = "Test-RecentPrivilegedAccounts" }
     # --- Phase 2: User & Identity ---
-    @{ Name = "Check User Accounts and Inactivity";  Func = "Test-UserAccountsAndInactivity" }
-    @{ Name = "Check Guest Users";                   Func = "Test-GuestUsers" }
-    @{ Name = "Check Passwords in Profile Fields";   Func = "Test-PasswordsInProfileFields" }
-    @{ Name = "Check Shadow Groups";                 Func = "Test-ShadowGroups" }
+    @{ Name = "Check User Accounts and Inactivity"; Func = "Test-UserAccountsAndInactivity" }
+    @{ Name = "Check Guest Users"; Func = "Test-GuestUsers" }
+    @{ Name = "Check Passwords in Profile Fields"; Func = "Test-PasswordsInProfileFields" }
+    @{ Name = "Check Shadow Groups"; Func = "Test-ShadowGroups" }
     @{ Name = "Check Role-Assignable Group Ownership"; Func = "Test-RoleAssignableGroupOwnership" }
     # --- Phase 3: Applications & Service Principals ---
-    @{ Name = "Check Application Credentials";       Func = "Test-ApplicationCredentials" }
+    @{ Name = "Check Application Credentials"; Func = "Test-ApplicationCredentials" }
     @{ Name = "Check Service Principal Permissions"; Func = "Test-ServicePrincipalPermissions" }
-    @{ Name = "Check OAuth Consent Grants";          Func = "Test-OAuthConsentGrants" }
-    @{ Name = "Check App Role Assignments";          Func = "Test-AppRoleAssignments" }
-    @{ Name = "Check Duplicate App Identifiers";     Func = "Test-DuplicateAppIdentifiers" }
+    @{ Name = "Check OAuth Consent Grants"; Func = "Test-OAuthConsentGrants" }
+    @{ Name = "Check App Role Assignments"; Func = "Test-AppRoleAssignments" }
+    @{ Name = "Check Duplicate App Identifiers"; Func = "Test-DuplicateAppIdentifiers" }
     # --- Phase 4: Authentication & Policy ---
-    @{ Name = "Check Conditional Access Policies";   Func = "Test-ConditionalAccessPolicies" }
+    @{ Name = "Check Conditional Access Policies"; Func = "Test-ConditionalAccessPolicies" }
     @{ Name = "Check Authentication Methods Policy"; Func = "Test-AuthenticationMethodsPolicy" }
-    @{ Name = "Check Privileged User MFA Coverage";  Func = "Test-PrivilegedUserMFACoverage" }
-    @{ Name = "Check Cross-Tenant Access Policy";    Func = "Test-CrossTenantAccessPolicy" }
-    @{ Name = "Check Authorization Policy";          Func = "Test-AuthorizationPolicy" }
+    @{ Name = "Check Privileged User MFA Coverage"; Func = "Test-PrivilegedUserMFACoverage" }
+    @{ Name = "Check Cross-Tenant Access Policy"; Func = "Test-CrossTenantAccessPolicy" }
+    @{ Name = "Check Authorization Policy"; Func = "Test-AuthorizationPolicy" }
     # --- Phase 5: Governance & Audit ---
-    @{ Name = "Check Admin Unit Delegation";         Func = "Test-AdminUnitDelegation" }
-    @{ Name = "Check PIM Configuration";             Func = "Test-PIMConfiguration" }
-    @{ Name = "Check Audit Log Retention";           Func = "Test-AuditLogRetention" }
+    @{ Name = "Check Admin Unit Delegation"; Func = "Test-AdminUnitDelegation" }
+    @{ Name = "Check PIM Configuration"; Func = "Test-PIMConfiguration" }
+    @{ Name = "Check Audit Log Retention"; Func = "Test-AuditLogRetention" }
     @{ Name = "Check Directory Role Assignment Paths"; Func = "Test-DirectoryRoleAssignmentPaths" }
-    @{ Name = "Check Named Locations";               Func = "Test-NamedLocations" }
+    @{ Name = "Check Named Locations"; Func = "Test-NamedLocation" }
 )
 
 function Show-Menu {
@@ -4767,27 +5147,40 @@ function Invoke-MenuLoop {
         
         if ($sel -as [int] -and $sel -ge 1 -and $sel -le $script:MenuChecks.Count) {
             $script:Findings = @()  # Clear findings for this run
-            $selectedFunc = $script:MenuChecks[$sel-1].Func
-            $checkName = $script:MenuChecks[$sel-1].Name -replace '\s+', ''
+            $selectedFunc = $script:MenuChecks[$sel - 1].Func
+            $checkName = $script:MenuChecks[$sel - 1].Name -replace '\s+', ''
             
             if ($selectedFunc -eq "ALL") {
                 Write-Host "`n[*] Running ALL checks..." -ForegroundColor Cyan
                 $checkName = "AllChecks"
-                foreach ($chk in $script:MenuChecks[1..($script:MenuChecks.Count-1)]) {
-                    & $chk.Func
+                foreach ($chk in $script:MenuChecks[1..($script:MenuChecks.Count - 1)]) {
+                    try {
+                        & $chk.Func
+                    }
+                    catch {
+                        Write-CheckError -CheckName $chk.Func -Message $_.Exception.Message -ErrorRecord $_
+                    }
                 }
             }
             else {
                 Write-Host "`n[*] Running: $($script:MenuChecks[$sel-1].Name)..." -ForegroundColor Cyan
-                & $selectedFunc
+                try {
+                    & $selectedFunc
+                }
+                catch {
+                    Write-CheckError -CheckName $selectedFunc -Message $_.Exception.Message -ErrorRecord $_
+                }
             }
             
             # Export findings
-            Export-Findings -CheckName $checkName
-            
+            Export-Finding -CheckName $checkName
+
             # Show recommendations
-            Show-Recommendations
-            
+            Show-Recommendation
+
+            # Show error summary with log file path
+            Show-ErrorSummary
+
             Write-Host "`nPress Enter to return to menu..." -ForegroundColor Gray
             Read-Host
         }
@@ -4827,8 +5220,8 @@ if (-not $connected) {
     exit 1
 }
 
-# Detect capabilities
-Get-TenantCapabilities
+# Detect capabilities (suppress output to prevent polluting the output stream when called via & from Start-EntraChecks)
+Get-TenantCapabilities | Out-Null
 
 # Determine which checks to run
 $checksToExecute = @()
@@ -4864,12 +5257,12 @@ if ($NonInteractive) {
         $percentComplete = [math]::Round(($currentCheck / $totalChecks) * 100, 0)
         Write-Progress -Activity "Running Security Checks" -Status "$checkFunc ($currentCheck of $totalChecks)" -PercentComplete $percentComplete
         
-        # Execute the check
+        # Execute the check (pipe to Out-Null to prevent output stream pollution when captured by Start-EntraChecks)
         try {
-            & $checkFunc
+            & $checkFunc | Out-Null
         }
         catch {
-            Write-Host "[!] Error in $checkFunc : $($_.Exception.Message)" -ForegroundColor Red
+            Write-CheckError -CheckName $checkFunc -Message $_.Exception.Message -ErrorRecord $_
         }
     }
     
@@ -4896,15 +5289,18 @@ if ($NonInteractive) {
     }
 
     # Export findings
-    Export-Findings -CheckName "AllChecks" | Out-Null
+    Export-Finding -CheckName "AllChecks" | Out-Null
 
     # Generate remediation script if requested
     if ($GenerateRemediationScript) {
-        Generate-RemediationScript
+        New-RemediationScript | Out-Null
     }
     
     # Show recommendations
-    Show-Recommendations
+    Show-Recommendation
+
+    # Show error summary with log file path
+    Show-ErrorSummary
 }
 else {
     # ========== INTERACTIVE MODE ==========
@@ -4912,8 +5308,11 @@ else {
     Invoke-MenuLoop
 }
 
-# Cleanup
-Disconnect-EntraChecks
+# Cleanup - only disconnect in standalone/interactive mode
+# When called from Start-EntraChecks (-NonInteractive), the caller manages the Graph session
+if (-not $NonInteractive) {
+    Disconnect-EntraChecks
+}
 
 # Log session summary
 if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
@@ -4937,20 +5336,26 @@ if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
     } -Result $(if ($failCount -gt 0) { "Warning" } else { "Success" })
 
     # Flush and stop logging
-    Stop-Logging
+    Stop-Logging | Out-Null
 }
 
-Stop-Transcript -ErrorAction SilentlyContinue
+Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
 
 Write-Host "`n[+] Script complete. Check $ReportDir for reports." -ForegroundColor Green
 
-# Return exit code based on findings (useful for CI/CD)
+# Return findings for integration with Start-EntraChecks
 if ($NonInteractive) {
+    # Output findings as objects so they can be captured
+    Write-Output $script:Findings
+
+    # Return exit code based on findings (useful for CI/CD)
     $failCount = ($script:Findings | Where-Object { $_.Status -eq "FAIL" }).Count
     if ($failCount -gt 0) {
-        exit 1  # Non-zero exit code if there are FAIL findings
+        $global:LASTEXITCODE = 1
     }
-    exit 0
+    else {
+        $global:LASTEXITCODE = 0
+    }
 }
 
 #endregion

@@ -1,11 +1,12 @@
-# Syntax validation script
+﻿# Syntax validation script
+$projectRoot = Split-Path $PSScriptRoot -Parent
 $files = @(
-    ".\Install-Prerequisites.ps1",
-    ".\Invoke-EntraChecks.ps1",
-    ".\Start-EntraChecks.ps1"
+    Join-Path $projectRoot "Install-Prerequisites.ps1",
+    Join-Path $projectRoot "Start-EntraChecks.ps1",
+    Join-Path $PSScriptRoot "Invoke-EntraChecks.ps1"
 )
 
-$moduleFiles = Get-ChildItem ".\Modules\*.psm1"
+$moduleFiles = Get-ChildItem (Join-Path $projectRoot "Modules\*.psm1")
 
 Write-Host "`n=== Testing PowerShell Scripts ===" -ForegroundColor Cyan
 

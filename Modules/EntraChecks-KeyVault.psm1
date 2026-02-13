@@ -302,7 +302,7 @@ function Disconnect-EntraChecksKeyVault {
             }
         }
         catch {
-            # Ignore errors during disconnect
+            Write-Verbose "Error during Key Vault disconnect: $_"
         }
         finally {
             $script:KeyVaultConnected = $false
@@ -353,6 +353,7 @@ function Disconnect-EntraChecksKeyVault {
     $secret = Get-KeyVaultSecret -SecretName "MySecret" -DefaultValue "default-value"
 #>
 function Get-KeyVaultSecret {
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -380,7 +381,7 @@ function Get-KeyVaultSecret {
                     return $DefaultValue
                 }
                 else {
-                    return ConvertTo-SecureString $DefaultValue -AsPlainText -Force
+                    return (New-Object System.Net.NetworkCredential('', $DefaultValue)).SecurePassword
                 }
             }
 
@@ -445,7 +446,7 @@ function Get-KeyVaultSecret {
                 return $DefaultValue
             }
             else {
-                return ConvertTo-SecureString $DefaultValue -AsPlainText -Force
+                return (New-Object System.Net.NetworkCredential('', $DefaultValue)).SecurePassword
             }
         }
 
@@ -519,7 +520,7 @@ function Set-KeyVaultSecret {
 
     # Convert to SecureString if plain text
     if ($SecretValue -is [string]) {
-        $SecretValue = ConvertTo-SecureString $SecretValue -AsPlainText -Force
+        $SecretValue = (New-Object System.Net.NetworkCredential('', $SecretValue)).SecurePassword
     }
 
     if ($PSCmdlet.ShouldProcess("Key Vault: $KeyVaultName", "Set secret: $SecretName")) {
@@ -629,7 +630,7 @@ function Test-KeyVaultSecret {
     2. Try environment variables
     3. Prompt user interactively (if allowed)
 
-.PARAMETER CredentialName
+.PARAMETER Identity
     Name/purpose of the credential (e.g., "GraphAPI", "ServicePrincipal").
 
 .PARAMETER KeyVaultSecretName
@@ -645,7 +646,7 @@ function Test-KeyVaultSecret {
     PSCredential object or $null if not found.
 
 .EXAMPLE
-    $cred = Get-EntraChecksCredential -CredentialName "GraphAPI" `
+    $cred = Get-EntraChecksCredential -Identity "GraphAPI" `
         -KeyVaultSecretName "graph-api-secret" `
         -EnvironmentVariable "GRAPH_API_SECRET" `
         -AllowInteractive
@@ -655,7 +656,7 @@ function Get-EntraChecksCredential {
     [OutputType([PSCredential])]
     param(
         [Parameter(Mandatory)]
-        [string]$CredentialName,
+        [string]$Identity,
 
         [Parameter()]
         [string]$KeyVaultSecretName,
@@ -671,12 +672,12 @@ function Get-EntraChecksCredential {
         try {
             if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
                 Write-Log -Level INFO -Message "Attempting to retrieve credential from Key Vault" -Category "KeyVault" -Properties @{
-                    CredentialName = $CredentialName
+                    Identity = $Identity
                 }
             }
 
             $password = Get-KeyVaultSecret -SecretName $KeyVaultSecretName -ErrorAction Stop
-            $credential = New-Object System.Management.Automation.PSCredential($CredentialName, $password)
+            $credential = New-Object System.Management.Automation.PSCredential($Identity, $password)
 
             if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
                 Write-Log -Level INFO -Message "Retrieved credential from Key Vault" -Category "KeyVault"
@@ -701,8 +702,8 @@ function Get-EntraChecksCredential {
                 }
             }
 
-            $password = ConvertTo-SecureString $envValue -AsPlainText -Force
-            return New-Object System.Management.Automation.PSCredential($CredentialName, $password)
+            $password = (New-Object System.Net.NetworkCredential('', $envValue)).SecurePassword
+            return New-Object System.Management.Automation.PSCredential($Identity, $password)
         }
     }
 
@@ -712,13 +713,13 @@ function Get-EntraChecksCredential {
             Write-Log -Level INFO -Message "Prompting for credential interactively" -Category "KeyVault"
         }
 
-        return Get-Credential -Message "Enter credentials for: $CredentialName"
+        return Get-Credential -Message "Enter credentials for: $Identity"
     }
 
     # No credential found
     if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
         Write-Log -Level WARN -Message "No credential found" -Category "KeyVault" -Properties @{
-            CredentialName = $CredentialName
+            Identity = $Identity
         }
     }
 

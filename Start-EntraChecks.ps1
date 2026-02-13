@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Start-EntraChecks.ps1
     Unified orchestration script for EntraChecks compliance assessment suite
@@ -90,7 +90,7 @@
 
 .NOTES
     Version: 1.0.0
-    Author: SolveGRC Team
+    Author: David Stells
 #>
 
 [CmdletBinding()]
@@ -103,7 +103,7 @@ param(
     [string]$TenantName,
 
     [Parameter()]
-    [string]$OutputDirectory = ".\Output",
+    [string]$OutputDirectory = ".\Reports",
 
     [Parameter()]
     [ValidateSet("Core", "IdentityProtection", "Devices", "SecureScore", "Defender", "AzurePolicy", "Purview", "All")]
@@ -123,8 +123,50 @@ param(
     [string]$ConfigFile,
 
     [Parameter()]
-    [string]$Environment
+    [string]$Environment,
+
+    # Comprehensive Reporting Options
+    [switch]$GenerateComprehensiveReport,
+
+    [switch]$GenerateExecutiveSummary,
+
+    [switch]$GenerateExcelReport,
+
+    [switch]$GenerateRemediationScripts
 )
+
+# Default comprehensive report and executive summary to enabled
+if (-not $PSBoundParameters.ContainsKey('GenerateComprehensiveReport')) {
+    $GenerateComprehensiveReport = [switch]::new($true)
+}
+if (-not $PSBoundParameters.ContainsKey('GenerateExecutiveSummary')) {
+    $GenerateExecutiveSummary = [switch]::new($true)
+}
+
+#region ==================== ENCODING FIX ====================
+# Fix console encoding to properly display Unicode characters
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+    $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+}
+catch {
+    # Non-fatal: Continue with default encoding if UTF-8 cannot be set
+    Write-Verbose "Could not set UTF-8 encoding: $_"
+}
+#endregion
+
+#region ==================== WAM BROKER FIX ====================
+# Disable WAM (Web Account Manager) broker globally before any Az module loads.
+# WAM causes Azure.Identity.Broker DLL version conflicts with
+# SharedTokenCacheCredentialBrokerOptions constructor errors.
+try {
+    Update-AzConfig -EnableLoginByWam $false -ErrorAction SilentlyContinue | Out-Null
+}
+catch {
+    Write-Verbose "Az module not yet loaded - WAM config will take effect when loaded: $_"
+}
+#endregion
 
 #region ==================== CONFIGURATION ====================
 
@@ -133,6 +175,13 @@ $script:ScriptRoot = $PSScriptRoot
 $script:ModulesPath = Join-Path $PSScriptRoot "Modules"
 $script:SnapshotsPath = Join-Path $PSScriptRoot "Snapshots"
 $script:LogsPath = Join-Path $PSScriptRoot "Logs"
+
+# Initialize data collection variables
+$script:Findings = @()
+$script:SecureScoreData = $null
+$script:DefenderComplianceData = $null
+$script:AzurePolicyData = $null
+$script:PurviewComplianceData = $null
 
 # Import configuration module
 $configModule = Join-Path $script:ModulesPath "EntraChecks-Configuration.psm1"
@@ -230,6 +279,51 @@ Write-AuditLog -EventType "SessionStarted" -Description "EntraChecks session sta
     Environment = $(if ($Environment) { $Environment } else { "None" })
 }
 
+#region ==================== ERROR KNOWLEDGE BASE ====================
+# Used by module error summary to classify errors for analyst-friendly output
+$script:ErrorKnowledge = @{}
+$ekEntry = @{}
+$ekEntry['Pattern'] = 'AADSTS|authentication failed|token.*expir|login required|InteractiveBrowser'
+$ekEntry['Cause'] = 'Authentication session expired or failed'
+$ekEntry['Resolution'] = 'Re-run the script and sign in again. If using scheduled mode, check service principal credentials.'
+$script:ErrorKnowledge['EC-AUTH'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = 'Forbidden|403|Insufficient privileges|Authorization_RequestDenied|insufficient.*scope'
+$ekEntry['Cause'] = 'Missing Graph API permissions'
+$ekEntry['Resolution'] = 'Have a Global Admin run .\Grant-AdminConsent.ps1 to grant required scopes, or sign in with Global Reader role.'
+$script:ErrorKnowledge['EC-PERM'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = 'Premium|P2.*required|license.*required|IdentityProtection|AAD_Premium'
+$ekEntry['Cause'] = 'Requires Azure AD Premium P2 license'
+$ekEntry['Resolution'] = 'This check requires an Azure AD Premium P2 license. Skip it with -ExcludeChecks or upgrade your license.'
+$script:ErrorKnowledge['EC-LIC'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = '429|throttl|Too Many Requests|rate.*limit'
+$ekEntry['Cause'] = 'Graph API rate limiting'
+$ekEntry['Resolution'] = 'Too many API requests. Wait a few minutes and re-run, or run fewer modules at once.'
+$script:ErrorKnowledge['EC-THROT'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = 'Not connected|no.*graph.*session|Connect-MgGraph|network|timeout|socket'
+$ekEntry['Cause'] = 'Graph/Azure connection lost'
+$ekEntry['Resolution'] = 'Network issue or session timeout. Check connectivity and re-run the script.'
+$script:ErrorKnowledge['EC-CONN'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = '404|Not Found|does not exist|resource.*not.*found'
+$ekEntry['Cause'] = 'Requested resource not found'
+$ekEntry['Resolution'] = 'The API endpoint or resource does not exist in this tenant. This may be expected if the feature is not configured.'
+$script:ErrorKnowledge['EC-NOTFOUND'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = 'Azure\.Identity\.Broker|WAM|Az\.Accounts|AzContext|subscription'
+$ekEntry['Cause'] = 'Azure module or authentication issue'
+$ekEntry['Resolution'] = 'Check Az module installation (Install-Module Az.Accounts). If WAM errors persist, restart PowerShell.'
+$script:ErrorKnowledge['EC-AZ'] = $ekEntry
+$ekEntry = @{}
+$ekEntry['Pattern'] = 'not recognized|CommandNotFound|Import-Module|module.*not.*found'
+$ekEntry['Cause'] = 'Required PowerShell module not installed'
+$ekEntry['Resolution'] = 'Run .\Install-Prerequisites.ps1 to install all required modules.'
+$script:ErrorKnowledge['EC-MOD'] = $ekEntry
+#endregion
+
 # Module definitions
 $script:ModuleDefinitions = @{
     Core = @{
@@ -284,18 +378,19 @@ $script:ModuleDefinitions = @{
 }
 
 # Required Graph scopes for all modules
+# Updated 2026-02-11: Fixed invalid permission names per Microsoft Graph API documentation
 $script:AllGraphScopes = @(
     "Directory.Read.All",
     "Policy.Read.All",
-    "SecurityEvents.Read.All",
+    "SecurityEvents.Read.All",               # Required for Secure Score API
     "AuditLog.Read.All",
     "IdentityRiskEvent.Read.All",
     "IdentityRiskyUser.Read.All",
     "Device.Read.All",
     "DeviceManagementManagedDevices.Read.All",
     "DeviceManagementConfiguration.Read.All",
-    "ComplianceManager.Read.All",
-    "InformationProtectionPolicy.Read"
+    "InformationProtectionPolicy.Read",            # For Purview Compliance Manager checks
+    "BitLockerKey.ReadBasic.All"                   # For BitLocker/device encryption compliance checks
 )
 
 #endregion
@@ -339,10 +434,11 @@ function Show-MainMenu {
     Write-Host "  │   [5] Manage Snapshots      - View/delete saved snapshots      │" -ForegroundColor Yellow
     Write-Host "  │                                                                 │" -ForegroundColor Gray
     Write-Host "  │   [A] Authentication        - Connect to Graph and Azure       │" -ForegroundColor Cyan
+    Write-Host "  │   [D] Disconnect            - Sign out (switch tenant)         │" -ForegroundColor Cyan
     Write-Host "  │   [S] Settings              - Configure output & preferences   │" -ForegroundColor Cyan
     Write-Host "  │   [H] Help                  - Documentation & guides           │" -ForegroundColor Cyan
     Write-Host "  │                                                                 │" -ForegroundColor Gray
-    Write-Host "  │   [Q] Quit                                                     │" -ForegroundColor Gray
+    Write-Host "  │   [Q] Quit                  - Quit and disconnect              │" -ForegroundColor Gray
     Write-Host "  │                                                                 │" -ForegroundColor Gray
     Write-Host "  └─────────────────────────────────────────────────────────────────┘" -ForegroundColor Gray
     Write-Host ""
@@ -375,25 +471,55 @@ function Show-ModuleMenu {
 
 function Show-AuthStatus {
     Write-Host "`n  Authentication Status:" -ForegroundColor Cyan
-    
+
     # Check Graph
     $graphContext = Get-MgContext -ErrorAction SilentlyContinue
     if ($graphContext) {
-        Write-Host "    [✓] Microsoft Graph: Connected as $($graphContext.Account)" -ForegroundColor Green
+        Write-Host "    [OK] Microsoft Graph: Connected as $($graphContext.Account)" -ForegroundColor Green
+        # Show granted scopes relevant to EntraChecks
+        $keyScopes = @(
+            'Directory.Read.All', 'Policy.Read.All', 'AuditLog.Read.All',
+            'SecurityEvents.Read.All', 'IdentityRiskEvent.Read.All',
+            'IdentityRiskyUser.Read.All', 'Device.Read.All'
+        )
+        $grantedScopes = $graphContext.Scopes
+        $missingScopes = @()
+        foreach ($scope in $keyScopes) {
+            if ($grantedScopes -notcontains $scope) {
+                $missingScopes += $scope
+            }
+        }
+        if ($missingScopes.Count -gt 0) {
+            Write-Host "    [i] Missing scopes: $($missingScopes -join ', ')" -ForegroundColor Yellow
+            Write-Host "    [i] Some modules may not return data without these permissions" -ForegroundColor Gray
+        }
+        else {
+            Write-Host "    [i] All key Graph scopes granted" -ForegroundColor Gray
+        }
     }
     else {
-        Write-Host "    [✗] Microsoft Graph: Not connected" -ForegroundColor Red
+        Write-Host "    [X] Microsoft Graph: Not connected" -ForegroundColor Red
+        Write-Host "    [i] Required for: Core checks, Secure Score, Identity Protection, Devices" -ForegroundColor Gray
     }
-    
+
     # Check Azure
     $azContext = Get-AzContext -ErrorAction SilentlyContinue
-    if ($azContext) {
-        Write-Host "    [✓] Azure: Connected to $($azContext.Subscription.Name)" -ForegroundColor Green
+    if ($azContext -and $azContext.Account) {
+        if ($azContext.Subscription -and $azContext.Subscription.Name) {
+            Write-Host "    [OK] Azure: Connected to $($azContext.Subscription.Name)" -ForegroundColor Green
+            Write-Host "    [i] Subscription ID: $($azContext.Subscription.Id)" -ForegroundColor Gray
+        }
+        else {
+            Write-Host "    [!] Azure: Connected but no subscription selected" -ForegroundColor Yellow
+            Write-Host "    [i] Run Set-AzContext -SubscriptionId <id> to select a subscription" -ForegroundColor Gray
+        }
+        Write-Host "    [i] Account: $($azContext.Account.Id)" -ForegroundColor Gray
     }
     else {
-        Write-Host "    [✗] Azure: Not connected" -ForegroundColor Red
+        Write-Host "    [X] Azure: Not connected" -ForegroundColor Red
+        Write-Host "    [i] Required for: Defender Compliance, Azure Policy" -ForegroundColor Gray
     }
-    
+
     Write-Host ""
 }
 
@@ -417,16 +543,18 @@ function Show-Progress {
 
 #region ==================== AUTHENTICATION ====================
 
-function Connect-EntraChecks {
+function Connect-EntraCheck {
     param(
         [switch]$GraphOnly,
-        [switch]$AzureOnly
+        [switch]$AzureOnly,
+        [switch]$UseDeviceCode
     )
 
     Write-Host "`n[+] Authenticating..." -ForegroundColor Cyan
     Write-Log -Level INFO -Message "Starting authentication process" -Category "Authentication" -Properties @{
         GraphOnly = $GraphOnly.IsPresent
         AzureOnly = $AzureOnly.IsPresent
+        UseDeviceCode = $UseDeviceCode.IsPresent
     }
 
     if (-not $AzureOnly) {
@@ -434,15 +562,50 @@ function Connect-EntraChecks {
         Write-Log -Level INFO -Message "Connecting to Microsoft Graph API" -Category "Authentication"
 
         try {
-            Connect-MgGraph -Scopes $script:AllGraphScopes -NoWelcome -ErrorAction Stop
-            $context = Get-MgContext
-            Write-Host "    [OK] Connected as: $($context.Account)" -ForegroundColor Green
+            # Check if already connected with sufficient scopes
+            $existingContext = Get-MgContext -ErrorAction SilentlyContinue
+            if ($existingContext -and $existingContext.Account) {
+                # Check for critical scopes - only reconnect if missing essential ones
+                $criticalScopes = @('Directory.Read.All', 'Policy.Read.All', 'AuditLog.Read.All')
+                $grantedScopes = $existingContext.Scopes
+                $missingCritical = @($criticalScopes | Where-Object { $grantedScopes -notcontains $_ })
 
-            Write-Log -Level INFO -Message "Microsoft Graph authentication successful" -Category "Authentication" -Properties @{
-                Account = $context.Account
-                TenantId = $context.TenantId
-                Scopes = ($context.Scopes -join ', ')
+                if ($missingCritical.Count -eq 0) {
+                    Write-Host "    [OK] Already connected as: $($existingContext.Account)" -ForegroundColor Green
+                    $context = $existingContext
+                }
+                else {
+                    Write-Host "    [i] Connected but missing scopes: $($missingCritical -join ', ')" -ForegroundColor Yellow
+                    Write-Host "    [i] Reconnecting with required scopes..." -ForegroundColor Gray
+                    if ($UseDeviceCode) {
+                        Connect-MgGraph -Scopes $script:AllGraphScopes -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
+                    }
+                    else {
+                        Connect-MgGraph -Scopes $script:AllGraphScopes -NoWelcome -ErrorAction Stop
+                    }
+                    $context = Get-MgContext
+                    Write-Host "    [OK] Connected as: $($context.Account)" -ForegroundColor Green
+                }
             }
+            else {
+                # Not connected - initiate new connection
+                if ($UseDeviceCode) {
+                    Write-Host "    Using device code flow - copy the code shown below" -ForegroundColor Yellow
+                    Connect-MgGraph -Scopes $script:AllGraphScopes -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
+                }
+                else {
+                    Write-Host "    TIP: If browser auth fails, select [A] Authentication and try device code" -ForegroundColor Gray
+                    Connect-MgGraph -Scopes $script:AllGraphScopes -NoWelcome -ErrorAction Stop
+                }
+                $context = Get-MgContext
+                Write-Host "    [OK] Connected as: $($context.Account)" -ForegroundColor Green
+            }
+
+            $logProps = @{}
+            $logProps['Account'] = $context.Account
+            $logProps['TenantId'] = $context.TenantId
+            $logProps['Scopes'] = ($context.Scopes -join ', ')
+            Write-Log -Level INFO -Message "Microsoft Graph authentication successful" -Category "Authentication" -Properties $logProps
             Write-AuditLog -EventType "AuthenticationSuccess" -Description "Microsoft Graph authentication succeeded" -TargetObject "Microsoft Graph API" -Result "Success"
         }
         catch {
@@ -459,17 +622,39 @@ function Connect-EntraChecks {
 
         try {
             $azContext = Get-AzContext -ErrorAction SilentlyContinue
-            if (-not $azContext) {
+            if (-not $azContext -or -not $azContext.Account) {
+                # WAM broker is disabled globally at script start (see WAM BROKER FIX region)
                 Connect-AzAccount -ErrorAction Stop | Out-Null
             }
             $azContext = Get-AzContext
-            Write-Host "    [OK] Connected to: $($azContext.Subscription.Name)" -ForegroundColor Green
 
-            Write-Log -Level INFO -Message "Azure authentication successful" -Category "Authentication" -Properties @{
-                Subscription = $azContext.Subscription.Name
-                SubscriptionId = $azContext.Subscription.Id
-                Account = $azContext.Account.Id
+            # If no subscription is selected, try to pick one automatically
+            if (-not $azContext.Subscription -or -not $azContext.Subscription.Id) {
+                $subs = Get-AzSubscription -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Enabled" }
+                if ($subs -and @($subs).Count -gt 0) {
+                    $selectedSub = @($subs)[0]
+                    Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+                    $azContext = Get-AzContext
+                    Write-Host "    [i] Auto-selected subscription: $($azContext.Subscription.Name)" -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "    [!] Connected to Azure but no enabled subscriptions found" -ForegroundColor Yellow
+                    Write-Host "    [i] Defender and Azure Policy modules require an active subscription" -ForegroundColor Gray
+                }
             }
+
+            if ($azContext.Subscription -and $azContext.Subscription.Name) {
+                Write-Host "    [OK] Connected to: $($azContext.Subscription.Name)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "    [OK] Connected to Azure (no subscription selected)" -ForegroundColor Yellow
+            }
+
+            $logProps = @{}
+            $logProps['Subscription'] = $azContext.Subscription.Name
+            $logProps['SubscriptionId'] = $azContext.Subscription.Id
+            $logProps['Account'] = $azContext.Account.Id
+            Write-Log -Level INFO -Message "Azure authentication successful" -Category "Authentication" -Properties $logProps
             Write-AuditLog -EventType "AuthenticationSuccess" -Description "Azure authentication succeeded" -TargetObject "Azure ARM API" -Result "Success"
         }
         catch {
@@ -481,6 +666,73 @@ function Connect-EntraChecks {
     }
 
     return $true
+}
+
+function Disconnect-EntraCheck {
+    <#
+    .SYNOPSIS
+        Disconnects from Microsoft Graph and Azure sessions.
+    .DESCRIPTION
+        Clears cached tokens for both Microsoft Graph and Azure to ensure
+        sessions do not persist after the tool exits. Important for security
+        and for switching between tenants.
+    #>
+    [CmdletBinding()]
+    param(
+        [switch]$Silent
+    )
+
+    if (-not $Silent) {
+        Write-Host "`n[+] Disconnecting sessions..." -ForegroundColor Cyan
+    }
+
+    # Disconnect Microsoft Graph
+    $graphContext = Get-MgContext -ErrorAction SilentlyContinue
+    if ($graphContext) {
+        try {
+            Disconnect-MgGraph -ErrorAction Stop | Out-Null
+            if (-not $Silent) {
+                Write-Host "    [OK] Microsoft Graph: Disconnected" -ForegroundColor Green
+            }
+            Write-Log -Level INFO -Message "Microsoft Graph session disconnected" -Category "Authentication"
+        }
+        catch {
+            if (-not $Silent) {
+                Write-Host "    [!] Graph disconnect error: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+    }
+    else {
+        if (-not $Silent) {
+            Write-Host "    [i] Microsoft Graph: Not connected" -ForegroundColor Gray
+        }
+    }
+
+    # Disconnect Azure
+    $azContext = Get-AzContext -ErrorAction SilentlyContinue
+    if ($azContext) {
+        try {
+            Disconnect-AzAccount -ErrorAction Stop | Out-Null
+            if (-not $Silent) {
+                Write-Host "    [OK] Azure: Disconnected" -ForegroundColor Green
+            }
+            Write-Log -Level INFO -Message "Azure session disconnected" -Category "Authentication"
+        }
+        catch {
+            if (-not $Silent) {
+                Write-Host "    [!] Azure disconnect error: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+    }
+    else {
+        if (-not $Silent) {
+            Write-Host "    [i] Azure: Not connected" -ForegroundColor Gray
+        }
+    }
+
+    if (-not $Silent) {
+        Write-Host ""
+    }
 }
 
 #endregion
@@ -504,10 +756,80 @@ function Invoke-ModuleAssessment {
     
     $totalModules = $SelectedModules.Count
     $currentModule = 0
-    
+
+    # Validate prerequisites for selected modules
+    Write-Host "`n[+] Validating prerequisites..." -ForegroundColor Cyan
+    $prerequisitesFailed = @()
+    $prerequisitesWarnings = @()
+
+    if ($SelectedModules -contains "Defender" -or $SelectedModules -contains "AzurePolicy") {
+        # Check Az modules
+        $requiredAzModules = @{
+            "Az.Accounts" = "Required for Azure authentication"
+            "Az.Security" = "Required for Defender for Cloud compliance"
+            "Az.PolicyInsights" = "Required for Azure Policy compliance"
+            "Az.Resources" = "Required for Azure Policy compliance"
+        }
+
+        $missingAzModules = @()
+        foreach ($module in $requiredAzModules.GetEnumerator()) {
+            if (-not (Get-Module -Name $module.Key -ListAvailable)) {
+                $missingAzModules += $module.Key
+                Write-Host "    [!] Missing: $($module.Key) - $($module.Value)" -ForegroundColor Red
+            }
+        }
+
+        if ($missingAzModules.Count -gt 0) {
+            $prerequisitesFailed += "Missing Az modules: $($missingAzModules -join ', ')"
+            Write-Host "    [i] Install with: Install-Module $($missingAzModules -join ', ') -Scope CurrentUser" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "    [OK] All required Az modules installed" -ForegroundColor Green
+        }
+
+        # Check Azure connection
+        $azContext = Get-AzContext -ErrorAction SilentlyContinue
+        if (-not $azContext) {
+            $prerequisitesWarnings += "Azure not connected - Defender and AzurePolicy modules will attempt connection"
+            Write-Host "    [!] Azure not connected - modules will prompt for authentication" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "    [OK] Azure connected: $($azContext.Subscription.Name)" -ForegroundColor Green
+        }
+    }
+
+    # Check Graph connection for all modules
+    $mgContext = Get-MgContext -ErrorAction SilentlyContinue
+    if (-not $mgContext) {
+        $prerequisitesFailed += "Microsoft Graph not connected"
+        Write-Host "    [!] Microsoft Graph not connected" -ForegroundColor Red
+    }
+    else {
+        Write-Host "    [OK] Microsoft Graph connected: $($mgContext.Account)" -ForegroundColor Green
+    }
+
+    # Handle prerequisites failures
+    if ($prerequisitesFailed.Count -gt 0) {
+        Write-Host "`n[!] Critical Prerequisites Missing:" -ForegroundColor Red
+        foreach ($issue in $prerequisitesFailed) {
+            Write-Host "    - $issue" -ForegroundColor Red
+        }
+        Write-Host "`n[i] Cannot continue without required prerequisites." -ForegroundColor Yellow
+        Write-Log -Level ERROR -Message "Prerequisites validation failed" -Category "Prerequisites" -Properties @{
+            Failed = ($prerequisitesFailed -join '; ')
+        }
+        return $null
+    }
+
+    if ($prerequisitesWarnings.Count -gt 0) {
+        Write-Host "`n[i] Warnings:" -ForegroundColor Yellow
+        foreach ($warning in $prerequisitesWarnings) {
+            Write-Host "    - $warning" -ForegroundColor Yellow
+        }
+    }
+
     foreach ($moduleName in $SelectedModules) {
         $currentModule++
-        $percentComplete = [math]::Floor(($currentModule / $totalModules) * 100)
 
         $moduleDef = $script:ModuleDefinitions[$moduleName]
         Write-Host "`n[$currentModule/$totalModules] Running: $($moduleDef.Name)" -ForegroundColor Magenta
@@ -524,39 +846,158 @@ function Invoke-ModuleAssessment {
         try {
             switch ($moduleName) {
                 "Core" {
-                    $scriptPath = Join-Path $script:ScriptRoot "Invoke-EntraChecks.ps1"
+                    $scriptPath = Join-Path (Join-Path $script:ScriptRoot "Scripts") "Invoke-EntraChecks.ps1"
                     if (Test-Path $scriptPath) {
-                        & $scriptPath -NonInteractive
-                        $results.Modules.Core = @{ Success = $true }
+                        # Capture findings from Core assessment
+                        $rawOutput = & $scriptPath -NonInteractive
+                        # Filter to only actual finding objects (PSCustomObjects with CheckName property)
+                        # The script output stream may contain non-finding objects (booleans, strings, hashtables)
+                        $coreFindings = @($rawOutput | Where-Object {
+                                $_ -is [PSCustomObject] -and $_.PSObject.Properties.Name -contains 'CheckName'
+                            })
+                        if ($coreFindings.Count -gt 0) {
+                            $script:Findings += $coreFindings
+                            Write-Log -Level INFO -Message "Captured $($coreFindings.Count) findings from Core module" -Category "ModuleExecution"
+                        }
+                        $results.Modules.Core = @{ Success = $true; FindingsCount = $coreFindings.Count }
                     }
                 }
                 
                 "IdentityProtection" {
                     $modulePath = Join-Path $script:ModulesPath "EntraChecks-IdentityProtection.psm1"
                     if (Test-Path $modulePath) {
+                        # Check Graph connection (required for Identity Protection API)
+                        $graphContext = Get-MgContext -ErrorAction SilentlyContinue
+                        if (-not $graphContext) {
+                            Write-Host "    [!] Microsoft Graph connection required for Identity Protection" -ForegroundColor Yellow
+                            Write-Host "    [i] Connect via [A] Authentication menu first" -ForegroundColor Gray
+                            $ipSkip = @{}
+                            $ipSkip['Success'] = $false
+                            $ipSkip['Error'] = "Microsoft Graph not connected"
+                            $results.Modules.IdentityProtection = $ipSkip
+                            $results.Errors += "IdentityProtection: Microsoft Graph not connected"
+                            Write-Log -Level WARN -Message "IdentityProtection skipped: Graph not connected" -Category "ModuleExecution"
+                            continue
+                        }
+
                         Import-Module $modulePath -Force
-                        Invoke-IdentityProtectionChecks
-                        $results.Modules.IdentityProtection = @{ Success = $true }
+                        try {
+                            Invoke-IdentityProtectionChecks
+                            # Capture findings from the module's internal collection
+                            $ipModule = Get-Module "EntraChecks-IdentityProtection"
+                            if ($ipModule) {
+                                $moduleFindings = & $ipModule { $script:Findings }
+                                if ($moduleFindings) {
+                                    $script:Findings += $moduleFindings
+                                    Write-Log -Level INFO -Message "Captured $($moduleFindings.Count) findings from Identity Protection module" -Category "ModuleExecution"
+                                }
+                            }
+                            $results.Modules.IdentityProtection = @{ Success = $true }
+                        }
+                        catch {
+                            Write-Host "    [!] Identity Protection error: $($_.Exception.Message)" -ForegroundColor Red
+                            $ipCatch = @{}
+                            $ipCatch['Success'] = $false
+                            $ipCatch['Error'] = $_.Exception.Message
+                            $results.Modules.IdentityProtection = $ipCatch
+                            $results.Errors += "IdentityProtection: $($_.Exception.Message)"
+                            Write-Log -Level ERROR -Message "Identity Protection collection failed" -Category "ModuleExecution" -ErrorRecord $_
+                        }
                     }
                 }
-                
+
                 "Devices" {
                     $modulePath = Join-Path $script:ModulesPath "EntraChecks-Devices.psm1"
                     if (Test-Path $modulePath) {
+                        # Check Graph connection (required for Device/Intune API)
+                        $graphContext = Get-MgContext -ErrorAction SilentlyContinue
+                        if (-not $graphContext) {
+                            Write-Host "    [!] Microsoft Graph connection required for Device checks" -ForegroundColor Yellow
+                            Write-Host "    [i] Connect via [A] Authentication menu first" -ForegroundColor Gray
+                            $devSkip = @{}
+                            $devSkip['Success'] = $false
+                            $devSkip['Error'] = "Microsoft Graph not connected"
+                            $results.Modules.Devices = $devSkip
+                            $results.Errors += "Devices: Microsoft Graph not connected"
+                            Write-Log -Level WARN -Message "Devices skipped: Graph not connected" -Category "ModuleExecution"
+                            continue
+                        }
+
                         Import-Module $modulePath -Force
-                        Invoke-DeviceChecks
-                        $results.Modules.Devices = @{ Success = $true }
+                        try {
+                            Invoke-DeviceChecks
+                            # Capture findings from the module's internal collection
+                            $devModule = Get-Module "EntraChecks-Devices"
+                            if ($devModule) {
+                                $moduleFindings = & $devModule { $script:Findings }
+                                if ($moduleFindings) {
+                                    $script:Findings += $moduleFindings
+                                    Write-Log -Level INFO -Message "Captured $($moduleFindings.Count) findings from Devices module" -Category "ModuleExecution"
+                                }
+                            }
+                            $results.Modules.Devices = @{ Success = $true }
+                        }
+                        catch {
+                            Write-Host "    [!] Device checks error: $($_.Exception.Message)" -ForegroundColor Red
+                            $devCatch = @{}
+                            $devCatch['Success'] = $false
+                            $devCatch['Error'] = $_.Exception.Message
+                            $results.Modules.Devices = $devCatch
+                            $results.Errors += "Devices: $($_.Exception.Message)"
+                            Write-Log -Level ERROR -Message "Device checks collection failed" -Category "ModuleExecution" -ErrorRecord $_
+                        }
                     }
                 }
                 
                 "SecureScore" {
                     $modulePath = Join-Path $script:ModulesPath "EntraChecks-SecureScore.psm1"
                     if (Test-Path $modulePath) {
+                        # Check Graph connection (required for Secure Score API)
+                        $graphContext = Get-MgContext -ErrorAction SilentlyContinue
+                        if (-not $graphContext) {
+                            Write-Host "    [!] Microsoft Graph connection required for Secure Score" -ForegroundColor Yellow
+                            Write-Host "    [i] Connect via [A] Authentication menu first" -ForegroundColor Gray
+                            $ssSkip = @{}
+                            $ssSkip['Success'] = $false
+                            $ssSkip['Error'] = "Microsoft Graph not connected"
+                            $results.Modules.SecureScore = $ssSkip
+                            $results.Errors += "SecureScore: Microsoft Graph not connected"
+                            Write-Log -Level WARN -Message "SecureScore skipped: Graph not connected" -Category "ModuleExecution"
+                            continue
+                        }
+
                         Import-Module $modulePath -Force
-                        $script:SecureScoreData = Get-SecureScore -IncludeHistory
-                        $results.Modules.SecureScore = @{ 
-                            Success = $true 
-                            Score = $script:SecureScoreData.ScorePercent
+                        try {
+                            $script:SecureScoreData = Get-SecureScore -IncludeHistory
+
+                            # Validate data was collected
+                            if ($script:SecureScoreData -and
+                                $null -ne $script:SecureScoreData.CurrentScore) {
+                                $ssResult = @{}
+                                $ssResult['Success'] = $true
+                                $ssResult['Score'] = $script:SecureScoreData.ScorePercent
+                                $results.Modules.SecureScore = $ssResult
+                                Write-Host "    [OK] Secure Score: $($script:SecureScoreData.CurrentScore)/$($script:SecureScoreData.MaxScore)" -ForegroundColor Green
+                            }
+                            else {
+                                $ssResult = @{}
+                                $ssResult['Success'] = $false
+                                $ssResult['Error'] = "No Secure Score data available (check permissions and API access)"
+                                $results.Modules.SecureScore = $ssResult
+                                $results.Errors += "SecureScore: No data returned"
+                                Write-Host "    [!] No Secure Score data available" -ForegroundColor Yellow
+                                Write-Host "    [i] Ensure SecurityEvents.Read.All permission is granted" -ForegroundColor Gray
+                                Write-Log -Level WARN -Message "Secure Score module returned no data" -Category "ModuleExecution"
+                            }
+                        }
+                        catch {
+                            Write-Host "    [!] Secure Score error: $($_.Exception.Message)" -ForegroundColor Red
+                            $ssCatch = @{}
+                            $ssCatch['Success'] = $false
+                            $ssCatch['Error'] = $_.Exception.Message
+                            $results.Modules.SecureScore = $ssCatch
+                            $results.Errors += "SecureScore: $($_.Exception.Message)"
+                            Write-Log -Level ERROR -Message "Secure Score collection failed" -Category "ModuleExecution" -ErrorRecord $_
                         }
                     }
                 }
@@ -564,11 +1005,69 @@ function Invoke-ModuleAssessment {
                 "Defender" {
                     $modulePath = Join-Path $script:ModulesPath "EntraChecks-DefenderCompliance.psm1"
                     if (Test-Path $modulePath) {
+                        # Check Azure connection (required for Defender module)
+                        $azContext = Get-AzContext -ErrorAction SilentlyContinue
+                        if (-not $azContext) {
+                            Write-Host "    [!] Azure connection required for Defender module" -ForegroundColor Yellow
+                            Write-Host "    [i] Connect via [A] Authentication menu first" -ForegroundColor Gray
+                            $defSkip = @{}
+                            $defSkip['Success'] = $false
+                            $defSkip['Error'] = "Azure connection required - please run Connect-AzAccount"
+                            $results.Modules.Defender = $defSkip
+                            $results.Errors += "Defender: Azure connection missing"
+                            continue
+                        }
+
+                        # Import module and collect data
                         Import-Module $modulePath -Force
-                        $script:DefenderComplianceData = Get-DefenderComplianceAssessment
-                        $results.Modules.Defender = @{ 
-                            Success = $true 
-                            Standards = $script:DefenderComplianceData.Summary.TotalStandards
+                        try {
+                            $script:DefenderComplianceData = Get-DefenderComplianceAssessment
+
+                            # Validate data was collected
+                            if ($script:DefenderComplianceData -and
+                                $script:DefenderComplianceData.Summary -and
+                                $script:DefenderComplianceData.Summary.TotalStandards -gt 0) {
+                                $defResult = @{}
+                                $defResult['Success'] = $true
+                                $defResult['Standards'] = $script:DefenderComplianceData.Summary.TotalStandards
+                                $defResult['Subscriptions'] = $script:DefenderComplianceData.Summary.TotalSubscriptions
+                                $results.Modules.Defender = $defResult
+                                Write-Host "    [OK] Collected data for $($script:DefenderComplianceData.Summary.TotalStandards) standards" -ForegroundColor Green
+                            }
+                            elseif ($script:DefenderComplianceData -and $script:DefenderComplianceData.Summary) {
+                                # Data returned but no enabled standards - not a failure
+                                $defWarn = @{}
+                                $defWarn['Success'] = $true
+                                $defWarn['Warning'] = "No regulatory compliance standards enabled in Defender for Cloud"
+                                $defWarn['Standards'] = 0
+                                $defWarn['Subscriptions'] = $script:DefenderComplianceData.Summary.TotalSubscriptions
+                                $results.Modules.Defender = $defWarn
+                                Write-Host "    [i] No enabled compliance standards found" -ForegroundColor Yellow
+                                Write-Host "    [i] To enable: Azure Portal > Defender for Cloud > Regulatory Compliance > Manage compliance policies" -ForegroundColor Gray
+                                Write-Log -Level WARN -Message "Defender module: no enabled compliance standards" -Category "ModuleExecution"
+                            }
+                            else {
+                                $defEmpty = @{}
+                                $defEmpty['Success'] = $false
+                                $defEmpty['Error'] = "No Defender compliance data collected"
+                                $results.Modules.Defender = $defEmpty
+                                $results.Errors += "Defender: No compliance data returned"
+                                Write-Host "    [!] No Defender compliance data collected" -ForegroundColor Yellow
+                                Write-Host "    [i] Possible causes:" -ForegroundColor Gray
+                                Write-Host "        - Microsoft.Security resource provider not registered" -ForegroundColor Gray
+                                Write-Host "        - Insufficient permissions to read Defender for Cloud data" -ForegroundColor Gray
+                                Write-Host "    [i] To enable: Azure Portal > Defender for Cloud > Regulatory Compliance > Manage compliance policies" -ForegroundColor Gray
+                                Write-Log -Level WARN -Message "Defender module returned no data" -Category "ModuleExecution"
+                            }
+                        }
+                        catch {
+                            Write-Host "    [!] Defender compliance error: $($_.Exception.Message)" -ForegroundColor Red
+                            $defCatch = @{}
+                            $defCatch['Success'] = $false
+                            $defCatch['Error'] = $_.Exception.Message
+                            $results.Modules.Defender = $defCatch
+                            $results.Errors += "Defender: $($_.Exception.Message)"
+                            Write-Log -Level ERROR -Message "Defender compliance collection failed" -Category "ModuleExecution" -ErrorRecord $_
                         }
                     }
                 }
@@ -576,11 +1075,42 @@ function Invoke-ModuleAssessment {
                 "AzurePolicy" {
                     $modulePath = Join-Path $script:ModulesPath "EntraChecks-AzurePolicy.psm1"
                     if (Test-Path $modulePath) {
+                        # Check Azure connection (required for Azure Policy module)
+                        $azContext = Get-AzContext -ErrorAction SilentlyContinue
+                        if (-not $azContext) {
+                            Write-Host "    [!] Azure connection required for Azure Policy module" -ForegroundColor Yellow
+                            Write-Host "    [i] Please ensure Azure connection via main authentication menu first" -ForegroundColor Gray
+                            $results.Modules.AzurePolicy = @{
+                                Success = $false
+                                Error = "Azure connection required - please run Connect-AzAccount"
+                            }
+                            $results.Errors += "AzurePolicy: Azure connection missing"
+                            continue
+                        }
+
+                        # Import module and collect data
                         Import-Module $modulePath -Force
                         $script:AzurePolicyData = Get-AzurePolicyComplianceAssessment
-                        $results.Modules.AzurePolicy = @{ 
-                            Success = $true 
-                            Policies = $script:AzurePolicyData.Summary.TotalPolicies
+
+                        # Validate data was collected
+                        if ($script:AzurePolicyData -and
+                            $script:AzurePolicyData.Summary -and
+                            $script:AzurePolicyData.Summary.TotalPolicies -gt 0) {
+                            $results.Modules.AzurePolicy = @{
+                                Success = $true
+                                Policies = $script:AzurePolicyData.Summary.TotalPolicies
+                                Subscriptions = $script:AzurePolicyData.Summary.TotalSubscriptions
+                            }
+                            Write-Host "    [OK] Collected data for $($script:AzurePolicyData.Summary.TotalPolicies) policies" -ForegroundColor Green
+                        }
+                        else {
+                            $results.Modules.AzurePolicy = @{
+                                Success = $false
+                                Error = "No Azure Policy data collected (may not have policy assignments)"
+                            }
+                            $results.Errors += "AzurePolicy: No policy data returned"
+                            Write-Host "    [!] No Azure Policy data collected" -ForegroundColor Yellow
+                            Write-Log -Level WARN -Message "Azure Policy module returned no data" -Category "ModuleExecution"
                         }
                     }
                 }
@@ -590,9 +1120,38 @@ function Invoke-ModuleAssessment {
                     if (Test-Path $modulePath) {
                         Import-Module $modulePath -Force
                         $script:PurviewComplianceData = Get-PurviewComplianceAssessment
-                        $results.Modules.Purview = @{ 
-                            Success = $true 
-                            Assessments = $script:PurviewComplianceData.Summary.TotalAssessments
+
+                        # Validate data was collected (Purview may return partial data)
+                        if ($script:PurviewComplianceData -and
+                            $script:PurviewComplianceData.Summary) {
+                            # Purview is considered successful even with partial data
+                            $dataCount = $script:PurviewComplianceData.Summary.TotalAssessments +
+                            $script:PurviewComplianceData.Summary.DLPPoliciesCount +
+                            $script:PurviewComplianceData.Summary.SensitivityLabelsCount
+
+                            $results.Modules.Purview = @{
+                                Success = $true
+                                Assessments = $script:PurviewComplianceData.Summary.TotalAssessments
+                                ComplianceManager = $script:PurviewComplianceData.Summary.ComplianceManagerAvailable
+                                DataCollected = $dataCount
+                            }
+
+                            if ($dataCount -gt 0) {
+                                Write-Host "    [OK] Collected Purview data: $dataCount items" -ForegroundColor Green
+                            }
+                            else {
+                                Write-Host "    [!] Purview APIs returned limited data (expected - many APIs not available)" -ForegroundColor Yellow
+                            }
+                        }
+                        else {
+                            $results.Modules.Purview = @{
+                                Success = $false
+                                Error = "No Purview data available (APIs may require E5 license or portal access)"
+                            }
+                            $results.Errors += "Purview: No data returned"
+                            Write-Host "    [!] No Purview data available" -ForegroundColor Yellow
+                            Write-Host "    [i] Many Purview features require manual access to compliance.microsoft.com" -ForegroundColor Gray
+                            Write-Log -Level WARN -Message "Purview module returned no data" -Category "ModuleExecution"
                         }
                     }
                 }
@@ -628,15 +1187,94 @@ function Invoke-ModuleAssessment {
     
     $results.EndTime = Get-Date
     $results.Duration = $results.EndTime - $results.StartTime
-    
+
+    # Display error summary if any issues occurred
+    $failedModules = $results.Modules.GetEnumerator() | Where-Object { -not $_.Value.Success }
+    if ($results.Errors.Count -gt 0 -or $failedModules.Count -gt 0) {
+        Write-Host "`n" -NoNewline
+        Write-Host "========================================" -ForegroundColor Yellow
+        Write-Host " Assessment Issues Summary" -ForegroundColor Yellow
+        Write-Host "========================================" -ForegroundColor Yellow
+
+        if ($failedModules.Count -gt 0) {
+            Write-Host "`n[!] Module Failures:" -ForegroundColor Red
+            foreach ($module in $failedModules) {
+                $errorMsg = $module.Value.Error
+                Write-Host "  - $($module.Key): $errorMsg" -ForegroundColor Red
+
+                # Classify error using knowledge base from Invoke-EntraChecks
+                $errorCode = 'EC-UNKNOWN'
+                $cause = $null
+                $fix = $null
+                if ($script:ErrorKnowledge) {
+                    foreach ($code in $script:ErrorKnowledge.Keys) {
+                        $kb = $script:ErrorKnowledge[$code]
+                        if ($errorMsg -match $kb.Pattern) {
+                            $errorCode = $code
+                            $cause = $kb.Cause
+                            $fix = $kb.Resolution
+                            break
+                        }
+                    }
+                }
+                if ($cause) {
+                    Write-Host "    [$errorCode] $cause" -ForegroundColor DarkYellow
+                    Write-Host "    Fix: $fix" -ForegroundColor DarkGray
+                }
+            }
+        }
+
+        if ($results.Errors.Count -gt 0) {
+            Write-Host "`n[!] Additional Errors:" -ForegroundColor Red
+            foreach ($err in $results.Errors) {
+                Write-Host "  - $err" -ForegroundColor Red
+            }
+        }
+
+        Write-Host "`n[i] Troubleshooting Tips:" -ForegroundColor Cyan
+        Write-Host "  - Check Azure connection: Get-AzContext" -ForegroundColor Gray
+        Write-Host "  - Check Graph connection: Get-MgContext" -ForegroundColor Gray
+        Write-Host "  - Verify permissions: (Get-MgContext).Scopes" -ForegroundColor Gray
+        Write-Host "  - Review logs: $script:LogsPath" -ForegroundColor Gray
+        Write-Host "  - Ensure required Az modules installed: Get-Module Az.* -ListAvailable" -ForegroundColor Gray
+
+        $successfulCount = ($results.Modules.GetEnumerator() | Where-Object { $_.Value.Success }).Count
+        Write-Host "`n[i] Modules: $successfulCount successful, $($failedModules.Count) failed" -ForegroundColor $(
+            if ($failedModules.Count -eq 0) { "Green" }
+            elseif ($successfulCount -gt 0) { "Yellow" }
+            else { "Red" }
+        )
+
+        # Show log file path for analyst to share with administrator
+        $logPath = $null
+        if (Get-Command Get-LogFilePath -ErrorAction SilentlyContinue) {
+            $logPath = Get-LogFilePath
+        }
+        if ($logPath) {
+            Write-Host "`n[i] Full error log: $logPath" -ForegroundColor Cyan
+            Write-Host "    Share this file with your administrator for troubleshooting." -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host "`n[i] Check $script:LogsPath for detailed error logs." -ForegroundColor Cyan
+        }
+        Write-Host ""
+    }
+    else {
+        Write-Host "`n[OK] All modules completed successfully!" -ForegroundColor Green
+    }
+
     return $results
 }
 
-function Export-AssessmentResults {
+function Export-AssessmentResult {
     param(
         [string]$OutputDir,
         [string]$TenantName,
-        [switch]$IncludeUnified
+        [switch]$IncludeUnified,
+        [switch]$GenerateComprehensiveReport,
+        [switch]$GenerateExecutiveSummary,
+        [switch]$GenerateExcelReport,
+        [switch]$GenerateRemediationScripts
     )
 
     Write-Host "`n[+] Generating reports..." -ForegroundColor Cyan
@@ -686,6 +1324,7 @@ function Export-AssessmentResults {
             Export-UnifiedComplianceReport `
                 -OutputDirectory $reportDir `
                 -TenantName $TenantName `
+                -Findings $script:Findings `
                 -IncludeSecureScore:($null -ne $script:SecureScoreData) `
                 -IncludeDefenderCompliance:($null -ne $script:DefenderComplianceData) `
                 -IncludeAzurePolicy:($null -ne $script:AzurePolicyData) `
@@ -696,7 +1335,83 @@ function Export-AssessmentResults {
                 -PurviewComplianceData $script:PurviewComplianceData
         }
     }
-    
+
+    # Generate comprehensive assessment report
+    if ($GenerateComprehensiveReport -and $script:Findings -and $script:Findings.Count -gt 0) {
+        Write-Host "`n[+] Generating comprehensive assessment report..." -ForegroundColor Cyan
+
+        $comprehensiveReportScript = Join-Path (Join-Path $PSScriptRoot "Scripts") "New-ComprehensiveAssessmentReport.ps1"
+
+        if (Test-Path $comprehensiveReportScript) {
+            try {
+                # Prepare external data
+                $externalData = @{
+                    SecureScore = $script:SecureScoreData
+                    DefenderCompliance = $script:DefenderComplianceData
+                    AzurePolicy = $script:AzurePolicyData
+                    PurviewCompliance = $script:PurviewComplianceData
+                }
+
+                # Include assessment errors in external data for the report
+                if ($results -and $results.Errors -and $results.Errors.Count -gt 0) {
+                    $externalData['AssessmentErrors'] = $results.Errors
+                }
+                $failedMods = @()
+                if ($results -and $results.Modules) {
+                    $failedMods = @($results.Modules.GetEnumerator() | Where-Object { -not $_.Value.Success })
+                }
+                if ($failedMods.Count -gt 0) {
+                    $externalData['FailedModules'] = $failedMods
+                }
+
+                # Build parameters for comprehensive report
+                $comprehensiveParams = @{
+                    Findings = $script:Findings
+                    TenantName = $TenantName
+                    OutputDirectory = $reportDir
+                    ExternalData = $externalData
+                }
+
+                # Add optional switches
+                if ($GenerateExecutiveSummary) {
+                    $comprehensiveParams['GenerateExecutivePDF'] = $true
+                }
+                if ($GenerateExcelReport) {
+                    $comprehensiveParams['GenerateExcelReport'] = $true
+                }
+                if ($GenerateRemediationScripts) {
+                    $comprehensiveParams['GenerateRemediationScripts'] = $true
+                }
+
+                # Call the comprehensive report generator
+                $comprehensiveResult = & $comprehensiveReportScript @comprehensiveParams
+
+                Write-Host "    [OK] Comprehensive report generated" -ForegroundColor Green
+                if ($comprehensiveResult.HTMLReport) {
+                    Write-Host "        - HTML Report: $($comprehensiveResult.HTMLReport)" -ForegroundColor Gray
+                }
+                if ($comprehensiveResult.ExecutiveSummary) {
+                    Write-Host "        - Executive Summary: $($comprehensiveResult.ExecutiveSummary)" -ForegroundColor Gray
+                }
+                if ($comprehensiveResult.ExcelReport) {
+                    Write-Host "        - Excel Report: $($comprehensiveResult.ExcelReport)" -ForegroundColor Gray
+                }
+            }
+            catch {
+                Write-Host "    [!] Error generating comprehensive report: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Log -Level ERROR -Message "Comprehensive report generation failed" -Category "Reporting" -Properties @{
+                    Error = $_.Exception.Message
+                }
+            }
+        }
+        else {
+            Write-Host "    [!] Comprehensive report script not found: $comprehensiveReportScript" -ForegroundColor Yellow
+        }
+    }
+    elseif ($GenerateComprehensiveReport -and (-not $script:Findings -or $script:Findings.Count -eq 0)) {
+        Write-Host "    [!] No findings available for comprehensive report" -ForegroundColor Yellow
+    }
+
     Write-Host "    [OK] Reports saved to: $reportDir" -ForegroundColor Green
 
     Write-Log -Level INFO -Message "Report generation completed" -Category "Reporting" -Properties @{
@@ -730,13 +1445,13 @@ function Start-InteractiveMode {
                 }
                 
                 if (-not $SkipAuthentication) {
-                    Connect-EntraChecks
+                    Connect-EntraCheck
                 }
                 
                 $allModules = @("Core", "IdentityProtection", "Devices", "SecureScore", "Defender", "AzurePolicy", "Purview")
                 $results = Invoke-ModuleAssessment -SelectedModules $allModules -TenantName $tenantName -OutputDir $OutputDirectory
                 
-                $reportDir = Export-AssessmentResults -OutputDir $OutputDirectory -TenantName $tenantName -IncludeUnified
+                $reportDir = Export-AssessmentResult -OutputDir $OutputDirectory -TenantName $tenantName -IncludeUnified -GenerateComprehensiveReport:$GenerateComprehensiveReport -GenerateExecutiveSummary:$GenerateExecutiveSummary -GenerateExcelReport:$GenerateExcelReport -GenerateRemediationScripts:$GenerateRemediationScripts
                 
                 if ($SaveSnapshot -or (Read-Host "`n  Save snapshot for future comparison? (Y/N)").ToUpper() -eq "Y") {
                     $deltaModule = Join-Path $script:ModulesPath "EntraChecks-DeltaReporting.psm1"
@@ -747,10 +1462,10 @@ function Start-InteractiveMode {
                         -AzurePolicyData $script:AzurePolicyData `
                         -PurviewComplianceData $script:PurviewComplianceData
                 }
-                
+
                 Write-Host "`n  Assessment complete! Duration: $($results.Duration.TotalMinutes.ToString('0.0')) minutes" -ForegroundColor Green
                 Write-Host "  Reports saved to: $reportDir" -ForegroundColor Cyan
-                
+
                 Read-Host "`n  Press Enter to continue"
             }
             
@@ -786,11 +1501,11 @@ function Start-InteractiveMode {
                                 }
                                 
                                 if (-not $SkipAuthentication) {
-                                    Connect-EntraChecks
+                                    Connect-EntraCheck
                                 }
                                 
                                 $results = Invoke-ModuleAssessment -SelectedModules $selectedModules -TenantName $tenantName -OutputDir $OutputDirectory
-                                $reportDir = Export-AssessmentResults -OutputDir $OutputDirectory -TenantName $tenantName -IncludeUnified
+                                $reportDir = Export-AssessmentResult -OutputDir $OutputDirectory -TenantName $tenantName -IncludeUnified -GenerateComprehensiveReport:$GenerateComprehensiveReport -GenerateExecutiveSummary:$GenerateExecutiveSummary -GenerateExcelReport:$GenerateExcelReport -GenerateRemediationScripts:$GenerateRemediationScripts
                                 
                                 Write-Host "`n  Assessment complete!" -ForegroundColor Green
                                 Read-Host "  Press Enter to continue"
@@ -877,10 +1592,16 @@ function Start-InteractiveMode {
             "A" {
                 # Authentication
                 Write-Host ""
-                Connect-EntraChecks
+                Connect-EntraCheck
                 Read-Host "`n  Press Enter to continue"
             }
-            
+
+            "D" {
+                # Disconnect / Sign out
+                Disconnect-EntraCheck
+                Read-Host "  Press Enter to continue"
+            }
+
             "S" {
                 # Settings
                 Write-Host "`n  Current Settings:" -ForegroundColor Cyan
@@ -910,7 +1631,8 @@ function Start-InteractiveMode {
             }
             
             "Q" {
-                Write-Host "`n  Goodbye!" -ForegroundColor Cyan
+                Disconnect-EntraCheck -Silent
+                Write-Host "`n  Sessions disconnected. Goodbye!" -ForegroundColor Cyan
                 return
             }
         }
@@ -929,7 +1651,7 @@ function Start-QuickMode {
     }
     
     if (-not $SkipAuthentication) {
-        Connect-EntraChecks
+        Connect-EntraCheck
     }
     
     $modulesToRun = if ($Modules -contains "All" -or -not $Modules) {
@@ -940,7 +1662,7 @@ function Start-QuickMode {
     }
     
     $results = Invoke-ModuleAssessment -SelectedModules $modulesToRun -TenantName $TenantName -OutputDir $OutputDirectory
-    $reportDir = Export-AssessmentResults -OutputDir $OutputDirectory -TenantName $TenantName -IncludeUnified
+    $reportDir = Export-AssessmentResult -OutputDir $OutputDirectory -TenantName $TenantName -IncludeUnified -GenerateComprehensiveReport:$GenerateComprehensiveReport -GenerateExecutiveSummary:$GenerateExecutiveSummary -GenerateExcelReport:$GenerateExcelReport -GenerateRemediationScripts:$GenerateRemediationScripts
     
     if ($SaveSnapshot) {
         $deltaModule = Join-Path $script:ModulesPath "EntraChecks-DeltaReporting.psm1"
@@ -1001,7 +1723,7 @@ function Start-ScheduledMode {
     }
     
     $results = Invoke-ModuleAssessment -SelectedModules $modulesToRun -TenantName $TenantName -OutputDir $OutputDirectory
-    Export-AssessmentResults -OutputDir $OutputDirectory -TenantName $TenantName -IncludeUnified
+    Export-AssessmentResult -OutputDir $OutputDirectory -TenantName $TenantName -IncludeUnified -GenerateComprehensiveReport:$GenerateComprehensiveReport -GenerateExecutiveSummary:$GenerateExecutiveSummary -GenerateExcelReport:$GenerateExcelReport -GenerateRemediationScripts:$GenerateRemediationScripts
     
     if ($SaveSnapshot) {
         $deltaModule = Join-Path $script:ModulesPath "EntraChecks-DeltaReporting.psm1"
@@ -1045,6 +1767,11 @@ catch {
     throw
 }
 finally {
+    # Disconnect Graph and Azure sessions
+    if (Get-Command Disconnect-EntraCheck -ErrorAction SilentlyContinue) {
+        Disconnect-EntraCheck -Silent
+    }
+
     # Cleanup and flush logs
     if (Get-Command Stop-Logging -ErrorAction SilentlyContinue) {
         Stop-Logging

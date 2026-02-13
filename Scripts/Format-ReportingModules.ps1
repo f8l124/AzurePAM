@@ -1,4 +1,4 @@
-# Format all new reporting modules with Invoke-Formatter
+﻿# Format all new reporting modules with Invoke-Formatter
 
 Write-Host "Auto-formatting new reporting modules..." -ForegroundColor Cyan
 Write-Host ""

@@ -990,23 +990,23 @@ function Expand-StringVariable {
     $pattern = '\$\{ENV:([^:}]+)(?::([^}]+))?\}'
 
     $expandedValue = [regex]::Replace($Value, $pattern, {
-        param($match)
-        $envVarName = $match.Groups[1].Value
-        $defaultValue = $match.Groups[2].Value
+            param($match)
+            $envVarName = $match.Groups[1].Value
+            $defaultValue = $match.Groups[2].Value
 
-        $envValue = [Environment]::GetEnvironmentVariable($envVarName)
+            $envValue = [Environment]::GetEnvironmentVariable($envVarName)
 
-        if ($null -ne $envValue) {
-            return $envValue
-        }
-        elseif ($defaultValue) {
-            return $defaultValue
-        }
-        else {
-            # Keep placeholder if no value or default
-            return $match.Value
-        }
-    })
+            if ($null -ne $envValue) {
+                return $envValue
+            }
+            elseif ($defaultValue) {
+                return $defaultValue
+            }
+            else {
+                # Keep placeholder if no value or default
+                return $match.Value
+            }
+        })
 
     return $expandedValue
 }
@@ -1081,7 +1081,7 @@ function Merge-ConfigurationDefaults {
     $schema = Get-ConfigurationSchema
 
     # Apply defaults from schema
-    $withDefaults = Apply-SchemaDefaults -ConfigObject $ConfigObject -SchemaProperties $schema.properties
+    $withDefaults = Set-SchemaDefaults -ConfigObject $ConfigObject -SchemaProperties $schema.properties
 
     return $withDefaults
 }
@@ -1099,7 +1099,7 @@ function Merge-ConfigurationDefaults {
 .OUTPUTS
     Configuration with defaults applied.
 #>
-function Apply-SchemaDefaults {
+function Set-SchemaDefaults {
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(
@@ -1121,7 +1121,7 @@ function Apply-SchemaDefaults {
         }
         elseif ($result.ContainsKey($key) -and $result[$key] -is [hashtable] -and $schemaProp.type -eq 'object' -and $schemaProp.ContainsKey('properties')) {
             # Recursively apply defaults to nested objects
-            $result[$key] = Apply-SchemaDefaults -ConfigObject $result[$key] -SchemaProperties $schemaProp.properties
+            $result[$key] = Set-SchemaDefaults -ConfigObject $result[$key] -SchemaProperties $schemaProp.properties
         }
     }
 

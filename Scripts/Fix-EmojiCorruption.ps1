@@ -1,4 +1,4 @@
-# Fix Emoji Corruption in HTML and Remediation Modules
+﻿# Fix Emoji Corruption in HTML and Remediation Modules
 Write-Host "Fixing emoji corruption..." -ForegroundColor Cyan
 
 $fixes = @{
@@ -28,7 +28,6 @@ foreach ($file in $fixes.Keys) {
 
     # Read file with UTF-8 encoding
     $content = Get-Content $filePath -Raw -Encoding UTF8
-    $originalLength = $content.Length
     $changesCount = 0
 
     foreach ($fix in $fixes[$file]) {

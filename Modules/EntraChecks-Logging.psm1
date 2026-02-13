@@ -65,6 +65,7 @@ function Initialize-LoggingSubsystem {
     .PARAMETER MaxFileSizeMB
         Maximum size of a single log file before rotation
     #>
+    [OutputType([bool])]
     [CmdletBinding()]
     param(
         [string]$LogDirectory = ".\Logs",
@@ -315,7 +316,7 @@ function Write-LogToFile {
         $script:LogConfig.Buffer.Add($logLine)
 
         if ($script:LogConfig.Buffer.Count -ge $script:LogConfig.BufferSize) {
-            Flush-LogBuffer
+            Clear-LogBuffer
         }
     }
     catch {
@@ -323,7 +324,11 @@ function Write-LogToFile {
     }
 }
 
-function Flush-LogBuffer {
+function Clear-LogBuffer {
+    <#
+    .SYNOPSIS
+        Flushes the in-memory log buffer to the configured log targets.
+    #>
     [CmdletBinding()]
     param()
 
@@ -417,9 +422,9 @@ function Write-AuditLog {
     param(
         [Parameter(Mandatory)]
         [ValidateSet('AuthenticationSuccess', 'AuthenticationFailure', 'CheckExecuted',
-                     'FindingDetected', 'ReportGenerated', 'ConfigurationChanged',
-                     'DataExported', 'SnapshotCreated', 'ComparisonPerformed',
-                     'ModuleLoaded', 'SessionStarted', 'SessionEnded')]
+            'FindingDetected', 'ReportGenerated', 'ConfigurationChanged',
+            'DataExported', 'SnapshotCreated', 'ComparisonPerformed',
+            'ModuleLoaded', 'SessionStarted', 'SessionEnded')]
         [string]$EventType,
 
         [Parameter(Mandatory)]
@@ -528,7 +533,7 @@ function Stop-Logging {
     Write-Log -Level INFO -Message "Logging subsystem shutting down" -Category "System"
 
     # Flush any buffered logs
-    Flush-LogBuffer
+    Clear-LogBuffer
 
     # Write session summary
     $duration = (Get-Date) - $script:LogConfig.StartTime
@@ -553,7 +558,7 @@ Export-ModuleMember -Function @(
     'Get-LoggingConfiguration',
     'Set-LogLevel',
     'Stop-Logging',
-    'Flush-LogBuffer'
+    'Clear-LogBuffer'
 )
 
 #endregion

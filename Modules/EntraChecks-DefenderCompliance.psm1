@@ -80,11 +80,56 @@ $script:SupportedStandards = @{
         ShortName = "MCSB"
         Framework = "Microsoft"
     }
+    "Azure-CIS-1.3.0" = @{
+        DisplayName = "CIS Microsoft Azure Foundations Benchmark v1.3.0"
+        ShortName = "CIS Azure 1.3"
+        Framework = "CIS"
+    }
+    "NIST-SP-800-171-R2" = @{
+        DisplayName = "NIST SP 800-171 Rev. 2"
+        ShortName = "NIST 800-171 R2"
+        Framework = "NIST"
+    }
+    "CMMC-Level-3" = @{
+        DisplayName = "CMMC Level 3"
+        ShortName = "CMMC L3"
+        Framework = "CMMC"
+    }
+    "FedRAMP-H" = @{
+        DisplayName = "FedRAMP High"
+        ShortName = "FedRAMP High"
+        Framework = "FedRAMP"
+    }
+    "FedRAMP-M" = @{
+        DisplayName = "FedRAMP Moderate"
+        ShortName = "FedRAMP Mod"
+        Framework = "FedRAMP"
+    }
+    "HIPAA-HITRUST" = @{
+        DisplayName = "HIPAA HITRUST"
+        ShortName = "HIPAA HITRUST"
+        Framework = "HIPAA"
+    }
+    "Canada-Federal-PBMM" = @{
+        DisplayName = "Canada Federal PBMM"
+        ShortName = "Canada PBMM"
+        Framework = "Canada"
+    }
+    "Azure-CSPM" = @{
+        DisplayName = "Azure Cloud Security Posture Management"
+        ShortName = "Azure CSPM"
+        Framework = "Microsoft"
+    }
 }
 
 #region ==================== MODULE INITIALIZATION ====================
 
+<#
+.SYNOPSIS
+    Initializes the Defender for Cloud compliance module and verifies required Az modules.
+#>
 function Initialize-DefenderComplianceModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -191,12 +236,18 @@ function Invoke-AzureRestRequest {
             return $response.Content | ConvertFrom-Json
         }
         else {
-            Write-Verbose "API returned status: $($response.StatusCode)"
+            Write-Host "    [!] API returned HTTP $($response.StatusCode) for: $Uri" -ForegroundColor Yellow
+            if ($response.StatusCode -eq 403) {
+                Write-Host "    [i] Insufficient permissions - Security Reader role required" -ForegroundColor Gray
+            }
+            elseif ($response.StatusCode -eq 404) {
+                Write-Host "    [i] Resource not found - Defender for Cloud may not be enabled" -ForegroundColor Gray
+            }
             return $null
         }
     }
     catch {
-        Write-Verbose "REST API Error: $($_.Exception.Message)"
+        Write-Host "    [!] REST API error: $($_.Exception.Message)" -ForegroundColor Yellow
         return $null
     }
 }
@@ -206,6 +257,7 @@ function Invoke-AzureRestRequest {
     Converts Defender compliance state to standard status.
 #>
 function ConvertTo-StandardStatus {
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [string]$State
@@ -259,11 +311,24 @@ function Get-DefenderComplianceStandards {
     Write-Host "`n[+] Getting compliance standards for subscription..." -ForegroundColor Cyan
     
     try {
+        # Check if Microsoft.Security resource provider is registered
+        $secProvider = Get-AzResourceProvider -ProviderNamespace "Microsoft.Security" -ErrorAction SilentlyContinue
+        if (-not $secProvider -or ($secProvider | Where-Object { $_.RegistrationState -eq "Registered" }).Count -eq 0) {
+            Write-Host "    [!] Microsoft.Security resource provider is not registered" -ForegroundColor Yellow
+            Write-Host "    [i] Register with: Register-AzResourceProvider -ProviderNamespace 'Microsoft.Security'" -ForegroundColor Gray
+            Write-Host "    [i] Registration may take a few minutes to complete" -ForegroundColor Gray
+            return $null
+        }
+
         $uri = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Security/regulatoryComplianceStandards"
         $response = Invoke-AzureRestRequest -Uri $uri -ApiVersion "2019-01-01-preview"
-        
+
         if (-not $response -or -not $response.value) {
-            Write-Host "    [!] No compliance standards found or Defender for Cloud not enabled" -ForegroundColor Yellow
+            Write-Host "    [!] No compliance standards found" -ForegroundColor Yellow
+            Write-Host "    [i] Possible causes:" -ForegroundColor Gray
+            Write-Host "        - Defender for Cloud free tier does not include regulatory compliance" -ForegroundColor Gray
+            Write-Host "        - No compliance standards have been enabled for this subscription" -ForegroundColor Gray
+            Write-Host "    [i] To enable: Azure Portal > Defender for Cloud > Regulatory Compliance > Manage compliance policies" -ForegroundColor Gray
             return $null
         }
         
@@ -285,8 +350,8 @@ function Get-DefenderComplianceStandards {
             }
         }
         
-        $enabledCount = ($standards | Where-Object { $_.State -eq "Enabled" }).Count
-        Write-Host "    [OK] Found $($standards.Count) standards ($enabledCount enabled)" -ForegroundColor Green
+        $activeCount = ($standards | Where-Object { $_.State -ne "Unsupported" }).Count
+        Write-Host "    [OK] Found $($standards.Count) standards ($activeCount active)" -ForegroundColor Green
         
         return $standards
     }
@@ -439,6 +504,7 @@ function Get-DefenderComplianceAssessments {
     Standardized compliance data object for integration with Compliance module.
 #>
 function Get-DefenderComplianceAssessment {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -513,13 +579,21 @@ function Get-DefenderComplianceAssessment {
             continue
         }
         
-        # Filter to requested standards if specified
-        $enabledStandards = $subStandards | Where-Object { $_.State -eq "Enabled" }
-        
+        # Include all standards except Unsupported (API returns state as Passed/Failed/Skipped, not Enabled/Disabled)
+        $enabledStandards = $subStandards | Where-Object { $_.State -ne "Unsupported" }
+
+        if (-not $enabledStandards -or @($enabledStandards).Count -eq 0) {
+            Write-Host "      [!] No active compliance standards found" -ForegroundColor Yellow
+            Write-Host "      [i] Found $(@($subStandards).Count) standard(s), but all are unsupported" -ForegroundColor Gray
+            Write-Host "      [i] Manage standards: Azure Portal > Defender for Cloud > Regulatory Compliance" -ForegroundColor Gray
+            $allResults.Subscriptions += $subscriptionResult
+            continue
+        }
+
         if ($Standards -and $Standards.Count -gt 0) {
             $enabledStandards = $enabledStandards | Where-Object { $_.Id -in $Standards }
         }
-        
+
         foreach ($standard in $enabledStandards) {
             Write-Host "      [>] Standard: $($standard.ShortName)" -ForegroundColor Gray
             
@@ -588,7 +662,7 @@ function Get-DefenderComplianceAssessment {
                     Subscriptions = @()
                 }
             }
-            $allResults.Standards[$standard.Id].Subscriptions += @{
+            $allResults.Standards[$standard.Id].Subscriptions += [PSCustomObject]@{
                 SubscriptionId = $subscription.Id
                 SubscriptionName = $subscription.Name
                 CompliancePercent = $standardResult.CompliancePercent
@@ -651,6 +725,7 @@ function Get-DefenderComplianceAssessment {
     Name of the tenant/organization.
 #>
 function Export-DefenderComplianceReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -1048,4 +1123,4 @@ Export-ModuleMember -Variable @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-DefenderComplianceModule
+$null = Initialize-DefenderComplianceModule

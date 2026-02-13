@@ -23,75 +23,75 @@
 # Base risk scores by finding type (0-100 scale)
 $Script:BaseRiskScores = @{
     # Critical Risk (80-100)
-    'MFA_AdminDisabled'                 = 95
-    'GlobalAdmin_Multiple'              = 90
-    'LegacyAuth_Enabled'                = 85
-    'AuditLog_NotEnabled'               = 85
-    'ConditionalAccess_Missing'         = 80
+    'MFA_AdminDisabled' = 95
+    'GlobalAdmin_Multiple' = 90
+    'LegacyAuth_Enabled' = 85
+    'AuditLog_NotEnabled' = 85
+    'ConditionalAccess_Missing' = 80
 
     # High Risk (60-79)
-    'MFA_Disabled'                      = 75
-    'AdminRoles_Excessive'              = 70
-    'AppConsent_UserAllowed'            = 70
-    'SecurityDefaults_Disabled'         = 65
-    'PasswordExpiry_Disabled'           = 65
-    'RiskySignIn_NoPolicy'              = 65
+    'MFA_Disabled' = 75
+    'AdminRoles_Excessive' = 70
+    'AppConsent_UserAllowed' = 70
+    'SecurityDefaults_Disabled' = 65
+    'PasswordExpiry_Disabled' = 65
+    'RiskySignIn_NoPolicy' = 65
 
     # Medium Risk (40-59)
-    'AppPermissions_Excessive'          = 55
-    'GuestAccess_Unrestricted'          = 55
-    'MailboxAudit_Disabled'             = 50
+    'AppPermissions_Excessive' = 55
+    'GuestAccess_Unrestricted' = 55
+    'MailboxAudit_Disabled' = 50
     'SelfServicePasswordReset_Disabled' = 45
-    'DLP_NotConfigured'                 = 50
+    'DLP_NotConfigured' = 50
 
     # Low Risk (20-39)
-    'PasswordPolicy_Weak'               = 35
-    'SessionTimeout_NotConfigured'      = 30
+    'PasswordPolicy_Weak' = 35
+    'SessionTimeout_NotConfigured' = 30
 
     # Default for unmapped findings
-    'Default'                           = 50
+    'Default' = 50
 }
 
 # Impact multipliers
 $Script:ImpactFactors = @{
     # Scope multipliers
-    'Organization'     = 1.3
-    'AllUsers'         = 1.2
-    'MultipleUsers'    = 1.1
-    'AdminUsers'       = 1.25
-    'SingleUser'       = 0.9
+    'Organization' = 1.3
+    'AllUsers' = 1.2
+    'MultipleUsers' = 1.1
+    'AdminUsers' = 1.25
+    'SingleUser' = 0.9
 
     # Data sensitivity multipliers
-    'HighlySensitive'  = 1.3
-    'Sensitive'        = 1.2
-    'Internal'         = 1.0
-    'Public'           = 0.8
+    'HighlySensitive' = 1.3
+    'Sensitive' = 1.2
+    'Internal' = 1.0
+    'Public' = 0.8
 
     # Exploitability multipliers
-    'EasyExploit'      = 1.3
-    'ModerateExploit'  = 1.1
+    'EasyExploit' = 1.3
+    'ModerateExploit' = 1.1
     'DifficultExploit' = 0.9
 }
 
 # Remediation effort scores (1-10 scale, where 1 is easy, 10 is hard)
 $Script:RemediationEffort = @{
-    'MFA_Disabled'                      = 3
-    'MFA_AdminDisabled'                 = 2
-    'SecurityDefaults_Disabled'         = 1
-    'ConditionalAccess_Missing'         = 7
-    'LegacyAuth_Enabled'                = 4
-    'PasswordExpiry_Disabled'           = 2
+    'MFA_Disabled' = 3
+    'MFA_AdminDisabled' = 2
+    'SecurityDefaults_Disabled' = 1
+    'ConditionalAccess_Missing' = 7
+    'LegacyAuth_Enabled' = 4
+    'PasswordExpiry_Disabled' = 2
     'SelfServicePasswordReset_Disabled' = 3
-    'AdminRoles_Excessive'              = 5
-    'GlobalAdmin_Multiple'              = 4
-    'GuestAccess_Unrestricted'          = 6
-    'AppPermissions_Excessive'          = 6
-    'AppConsent_UserAllowed'            = 3
-    'DLP_NotConfigured'                 = 8
-    'AuditLog_NotEnabled'               = 2
-    'MailboxAudit_Disabled'             = 2
-    'RiskySignIn_NoPolicy'              = 6
-    'Default'                           = 5
+    'AdminRoles_Excessive' = 5
+    'GlobalAdmin_Multiple' = 4
+    'GuestAccess_Unrestricted' = 6
+    'AppPermissions_Excessive' = 6
+    'AppConsent_UserAllowed' = 3
+    'DLP_NotConfigured' = 8
+    'AuditLog_NotEnabled' = 2
+    'MailboxAudit_Disabled' = 2
+    'RiskySignIn_NoPolicy' = 6
+    'Default' = 5
 }
 
 #endregion
@@ -106,7 +106,7 @@ function Get-BaseRiskScore {
     .PARAMETER FindingType
         The type of finding
 
-    .RETURNS
+    .OUTPUTS
         Base risk score (0-100)
     #>
     [CmdletBinding()]
@@ -129,7 +129,7 @@ function Get-RemediationEffort {
     .PARAMETER FindingType
         The type of finding
 
-    .RETURNS
+    .OUTPUTS
         Effort score (1-10, where 1 is easy, 10 is hard)
     #>
     [CmdletBinding()]
@@ -144,7 +144,7 @@ function Get-RemediationEffort {
     return $Script:RemediationEffort['Default']
 }
 
-function Calculate-RiskScore {
+function Measure-RiskScore {
     <#
     .SYNOPSIS
         Calculates the risk score for a finding.
@@ -160,21 +160,29 @@ function Calculate-RiskScore {
     .PARAMETER Finding
         The finding object to score
 
-    .RETURNS
+    .OUTPUTS
         Risk score (0-100)
 
     .EXAMPLE
-        Calculate-RiskScore -Finding $finding
+        Measure-RiskScore -Finding $finding
     #>
     [CmdletBinding()]
+    [OutputType([int])]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
         [object]$Finding
     )
 
     process {
+        # OK and INFO findings represent passing checks - assign minimal risk
+        if ($Finding.Status -eq 'OK') { return 0 }
+        if ($Finding.Status -eq 'INFO') { return 5 }
+
         # Get finding type
         $findingType = if ($null -ne $Finding.Type) { $Finding.Type } elseif ($null -ne $Finding.CheckType) { $Finding.CheckType } elseif ($null -ne $Finding.Category) { $Finding.Category } else { 'Default' }
+
+        # WARNING findings get reduced base score (less severe than FAIL)
+        $statusMultiplier = if ($Finding.Status -eq 'WARNING') { 0.7 } else { 1.0 }
 
         # Start with base risk score
         $baseScore = Get-BaseRiskScore -FindingType $findingType
@@ -205,9 +213,9 @@ function Calculate-RiskScore {
         } else {
             # Assign default exploitability based on finding type
             $exploitMultiplier = switch -Regex ($findingType) {
-                'Auth|MFA|Password' { 1.3 } # Authentication issues are easily exploited
-                'Admin|Privilege' { 1.2 }   # Privilege escalation opportunities
-                'Audit|Log' { 0.9 }         # Detection issues are harder to exploit directly
+                'Auth|MFA|Password' { 1.3; break } # Authentication issues are easily exploited
+                'Admin|Privilege' { 1.2; break }   # Privilege escalation opportunities
+                'Audit|Log' { 0.9; break }         # Detection issues are harder to exploit directly
                 default { 1.0 }
             }
         }
@@ -219,7 +227,7 @@ function Calculate-RiskScore {
         }
 
         # Calculate final risk score
-        $riskScore = ($baseScore * $scopeMultiplier * $sensitivityMultiplier * $exploitMultiplier) + $complianceBoost
+        $riskScore = ($baseScore * $statusMultiplier * $scopeMultiplier * $sensitivityMultiplier * $exploitMultiplier) + $complianceBoost
 
         # Cap at 100
         $riskScore = [Math]::Min(100, $riskScore)
@@ -237,10 +245,11 @@ function Get-RiskLevel {
     .PARAMETER RiskScore
         The risk score (0-100)
 
-    .RETURNS
+    .OUTPUTS
         Risk level string: 'Critical', 'High', 'Medium', 'Low', 'Info'
     #>
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory)]
         [double]$RiskScore
@@ -275,7 +284,7 @@ function Add-RiskScoring {
 
     process {
         # Calculate risk score
-        $riskScore = Calculate-RiskScore -Finding $Finding
+        $riskScore = Measure-RiskScore -Finding $Finding
 
         # Determine risk level
         $riskLevel = Get-RiskLevel -RiskScore $riskScore
@@ -295,10 +304,10 @@ function Add-RiskScoring {
 
         # Add effort description
         $effortDescription = switch ($effort) {
-            { $_ -le 2 } { 'Quick Win (< 1 hour)' }
-            { $_ -le 4 } { 'Easy (1-4 hours)' }
-            { $_ -le 6 } { 'Moderate (1-2 days)' }
-            { $_ -le 8 } { 'Complex (3-5 days)' }
+            { $_ -le 2 } { 'Quick Win (< 1 hour)'; break }
+            { $_ -le 4 } { 'Easy (1-4 hours)'; break }
+            { $_ -le 6 } { 'Moderate (1-2 days)'; break }
+            { $_ -le 8 } { 'Complex (3-5 days)'; break }
             default { 'Very Complex (> 1 week)' }
         }
         $Finding | Add-Member -NotePropertyName 'RemediationEffortDescription' -NotePropertyValue $effortDescription -Force
@@ -329,6 +338,7 @@ function Get-PrioritizedFindings {
     .EXAMPLE
         $prioritized = Get-PrioritizedFindings -Findings $allFindings
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -349,19 +359,19 @@ function Get-PrioritizedFindings {
     if ($GroupByPriority) {
         # Group by priority tiers
         $priorityGroups = @{
-            'Priority 1 - Critical & Quick Wins'  = @($scoredFindings | Where-Object {
+            'Priority 1 - Critical & Quick Wins' = @($scoredFindings | Where-Object {
                     ($_.RiskLevel -eq 'Critical' -or $_.PriorityScore -ge 30) -and $_.RemediationEffort -le 3
                 })
-            'Priority 2 - High Risk'              = @($scoredFindings | Where-Object {
+            'Priority 2 - High Risk' = @($scoredFindings | Where-Object {
                     $_.RiskLevel -eq 'Critical' -or $_.RiskLevel -eq 'High'
                 } | Where-Object { $_.RemediationEffort -gt 3 })
             'Priority 3 - Medium Risk Quick Wins' = @($scoredFindings | Where-Object {
                     $_.RiskLevel -eq 'Medium' -and $_.RemediationEffort -le 4
                 })
-            'Priority 4 - Medium Risk'            = @($scoredFindings | Where-Object {
+            'Priority 4 - Medium Risk' = @($scoredFindings | Where-Object {
                     $_.RiskLevel -eq 'Medium' -and $_.RemediationEffort -gt 4
                 })
-            'Priority 5 - Low Risk'               = @($scoredFindings | Where-Object {
+            'Priority 5 - Low Risk' = @($scoredFindings | Where-Object {
                     $_.RiskLevel -eq 'Low' -or $_.RiskLevel -eq 'Info'
                 })
         }
@@ -432,13 +442,14 @@ function Get-RiskSummary {
     .PARAMETER Findings
         Array of findings to analyze
 
-    .RETURNS
+    .OUTPUTS
         Hashtable with risk statistics
 
     .EXAMPLE
         $summary = Get-RiskSummary -Findings $allFindings
     #>
     [CmdletBinding()]
+    [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)]
         [array]$Findings
@@ -455,21 +466,21 @@ function Get-RiskSummary {
 
     # Calculate statistics
     $summary = @{
-        TotalFindings    = $scoredFindings.Count
+        TotalFindings = $scoredFindings.Count
         AverageRiskScore = [Math]::Round(($scoredFindings | Measure-Object -Property RiskScore -Average).Average, 1)
-        MaxRiskScore     = ($scoredFindings | Measure-Object -Property RiskScore -Maximum).Maximum
-        MinRiskScore     = ($scoredFindings | Measure-Object -Property RiskScore -Minimum).Minimum
+        MaxRiskScore = ($scoredFindings | Measure-Object -Property RiskScore -Maximum).Maximum
+        MinRiskScore = ($scoredFindings | Measure-Object -Property RiskScore -Minimum).Minimum
 
         # Risk level distribution
-        CriticalCount    = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Critical' }).Count
-        HighCount        = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'High' }).Count
-        MediumCount      = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Medium' }).Count
-        LowCount         = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Low' }).Count
-        InfoCount        = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Info' }).Count
+        CriticalCount = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Critical' }).Count
+        HighCount = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'High' }).Count
+        MediumCount = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Medium' }).Count
+        LowCount = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Low' }).Count
+        InfoCount = @($scoredFindings | Where-Object { $_.RiskLevel -eq 'Info' }).Count
 
         # Remediation effort
-        QuickWinsCount   = @($scoredFindings | Where-Object { $_.RemediationEffort -le 3 }).Count
-        ComplexCount     = @($scoredFindings | Where-Object { $_.RemediationEffort -ge 7 }).Count
+        QuickWinsCount = @($scoredFindings | Where-Object { $_.RemediationEffort -le 3 }).Count
+        ComplexCount = @($scoredFindings | Where-Object { $_.RemediationEffort -ge 7 }).Count
 
         # Priority insights
         TopPriorityCount = @($scoredFindings | Where-Object { $_.PriorityScore -ge 20 }).Count
@@ -587,7 +598,7 @@ function Format-PriorityRecommendation {
 #region Export Module Members
 
 Export-ModuleMember -Function @(
-    'Calculate-RiskScore',
+    'Measure-RiskScore',
     'Get-RiskLevel',
     'Add-RiskScoring',
     'Get-PrioritizedFindings',

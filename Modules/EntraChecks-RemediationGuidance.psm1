@@ -23,19 +23,19 @@
 #region Remediation Guidance Data
 
 $Script:RemediationGuidance = @{
-    'MFA_Disabled'              = @{
-        Title           = 'Enable Multi-Factor Authentication for All Users'
-        Summary         = 'Require MFA for all users to add an additional layer of security beyond passwords'
-        Impact          = @{
+    'MFA_Disabled' = @{
+        Title = 'Enable Multi-Factor Authentication for All Users'
+        Summary = 'Require MFA for all users to add an additional layer of security beyond passwords'
+        Impact = @{
             Positive = 'Significantly reduces account compromise risk; Protects against password attacks'
             Negative = 'Users will need MFA device/app; Initial enrollment required; May cause support tickets'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Global Administrator or Authentication Policy Administrator role'
             'Microsoft Authenticator app or compatible MFA method'
             'Communication plan for user rollout'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Protection > Authentication methods'
             '3. Click on "Authentication methods" > "Policies"'
@@ -80,41 +80,41 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params
 # After testing, enable the policy:
 # Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId <PolicyId> -State "enabled"
 '@
-        Verification    = @(
+        Verification = @(
             'Test with a non-admin user account'
             'Sign out and sign back in - should prompt for MFA'
             'Verify MFA registration portal: https://aka.ms/mfasetup'
             'Check sign-in logs for MFA requirements'
         )
-        Rollback        = @(
+        Rollback = @(
             'Set Conditional Access policy to "Report-only" mode'
             'Or disable the policy temporarily'
             'Emergency access: Use break-glass admin account'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: Users cannot enroll MFA | Solution: Verify authentication methods are enabled'
             'Issue: Policy not applying | Solution: Check user exclusions and policy scope'
             'Issue: MFA prompt every time | Solution: Configure trusted locations and remember MFA settings'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/identity/authentication/tutorial-enable-azure-mfa'
             'https://learn.microsoft.com/entra/identity/conditional-access/howto-conditional-access-policy-all-users-mfa'
         )
     }
 
-    'MFA_AdminDisabled'         = @{
-        Title           = 'Enable Multi-Factor Authentication for Admin Users'
-        Summary         = 'Require MFA for all administrative accounts as a critical security control'
-        Impact          = @{
+    'MFA_AdminDisabled' = @{
+        Title = 'Enable Multi-Factor Authentication for Admin Users'
+        Summary = 'Require MFA for all administrative accounts as a critical security control'
+        Impact = @{
             Positive = 'Protects privileged accounts from compromise; Required by compliance standards'
             Negative = 'Admins must enroll in MFA; May slow down admin access initially'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Global Administrator role'
             'MFA methods enabled (Microsoft Authenticator recommended)'
             'Emergency access accounts excluded from policy'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Protection > Conditional Access'
             '3. Create new policy: "Require MFA for administrators"'
@@ -163,38 +163,38 @@ $params = @{
 
 New-MgIdentityConditionalAccessPolicy -BodyParameter $params
 '@
-        Verification    = @(
+        Verification = @(
             'Sign in with admin account - should require MFA'
             'Verify all admin accounts have MFA registered'
             'Check sign-in logs for admin MFA compliance'
             'Test emergency access account still works'
         )
-        Rollback        = @(
+        Rollback = @(
             'Disable Conditional Access policy'
             'Use emergency access account if locked out'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: Admin locked out | Solution: Use break-glass emergency account'
             'Issue: MFA not required for certain admins | Solution: Check role assignments and policy scope'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/identity/conditional-access/howto-conditional-access-policy-admin-mfa'
         )
     }
 
-    'LegacyAuth_Enabled'        = @{
-        Title           = 'Block Legacy Authentication Protocols'
-        Summary         = 'Prevent sign-ins using legacy protocols that do not support modern authentication (MFA)'
-        Impact          = @{
+    'LegacyAuth_Enabled' = @{
+        Title = 'Block Legacy Authentication Protocols'
+        Summary = 'Prevent sign-ins using legacy protocols that do not support modern authentication (MFA)'
+        Impact = @{
             Positive = 'Blocks protocols vulnerable to password spray attacks; Enforces MFA capability'
             Negative = 'May break old email clients (Outlook 2010, older); POP3/IMAP apps may fail'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Global Administrator or Security Administrator role'
             'Inventory of applications using legacy auth (check sign-in logs)'
             'Plan to migrate users to modern authentication'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Protection > Conditional Access'
             '3. Create new policy: "Block legacy authentication"'
@@ -237,41 +237,41 @@ New-MgIdentityConditionalAccessPolicy -BodyParameter $params
 # After testing period, enable the policy:
 # Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId <PolicyId> -State "enabled"
 '@
-        Verification    = @(
+        Verification = @(
             'Run policy in report-only mode for 1-2 weeks'
             'Review sign-in logs for legacy auth attempts'
             'Contact affected users to update their applications'
             'Enable policy and monitor for issues'
         )
-        Rollback        = @(
+        Rollback = @(
             'Set policy to "Report-only" mode'
             'Or temporarily disable policy'
             'Allow specific users/apps via exclusions'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: Email stops working | Solution: Update to modern Outlook client or configure OAuth'
             'Issue: Mobile app cannot sync | Solution: Update app or enable modern auth for Exchange Online'
             'Issue: Third-party app fails | Solution: Update app or work with vendor for modern auth support'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/identity/conditional-access/block-legacy-authentication'
             'https://learn.microsoft.com/exchange/clients-and-mobile-in-exchange-online/enable-or-disable-modern-authentication-in-exchange-online'
         )
     }
 
     'ConditionalAccess_Missing' = @{
-        Title           = 'Configure Conditional Access Policies'
-        Summary         = 'Implement risk-based access controls using Conditional Access'
-        Impact          = @{
+        Title = 'Configure Conditional Access Policies'
+        Summary = 'Implement risk-based access controls using Conditional Access'
+        Impact = @{
             Positive = 'Fine-grained access control; Risk-based authentication; Compliance enforcement'
             Negative = 'Requires Azure AD P1/P2; More complex management; Potential user friction'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Azure AD Premium P1 or P2 license'
             'Global Administrator or Conditional Access Administrator role'
             'Understanding of organizational access requirements'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Protection > Conditional Access'
             '3. Create baseline policies:'
@@ -314,41 +314,41 @@ $params = @{
 
 New-MgIdentityConditionalAccessPolicy -BodyParameter $params
 '@
-        Verification    = @(
+        Verification = @(
             'Test each policy with pilot users before organization-wide rollout'
             'Monitor sign-in logs for policy application'
             'Review report-only mode results'
             'Validate emergency access accounts are excluded'
         )
-        Rollback        = @(
+        Rollback = @(
             'Set policies to "Report-only" mode'
             'Disable problematic policies'
             'Use emergency access accounts if needed'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: Users locked out | Solution: Check exclusions and emergency access'
             'Issue: Policy not applying | Solution: Verify license requirements and scope'
             'Issue: Conflicting policies | Solution: Review policy order and conditions'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/identity/conditional-access/overview'
             'https://learn.microsoft.com/entra/identity/conditional-access/plan-conditional-access'
         )
     }
 
-    'AuditLog_NotEnabled'       = @{
-        Title           = 'Enable Audit Logging'
-        Summary         = 'Enable comprehensive audit logging for security monitoring and compliance'
-        Impact          = @{
+    'AuditLog_NotEnabled' = @{
+        Title = 'Enable Audit Logging'
+        Summary = 'Enable comprehensive audit logging for security monitoring and compliance'
+        Impact = @{
             Positive = 'Security event visibility; Compliance requirement; Investigation capability'
             Negative = 'Generates log data; May require additional storage; Licensing requirements'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Global Administrator role'
             'Azure AD Premium P1/P2 for extended retention'
             'Log Analytics workspace for long-term storage (optional)'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Identity > Monitoring & health > Audit logs'
             '3. Verify audit logs are being collected'
@@ -385,40 +385,40 @@ $diagnosticSetting = @{
 # Note: Set-AzDiagnosticSetting requires resource ID for Azure AD
 # Use Azure Portal or REST API for Azure AD diagnostic settings
 '@
-        Verification    = @(
+        Verification = @(
             'Navigate to Audit logs in Azure AD portal'
             'Verify recent activities are logged'
             'Check Log Analytics workspace for ingested logs'
             'Run sample KQL query to validate data'
         )
-        Rollback        = @(
+        Rollback = @(
             'N/A - Audit logging should always be enabled'
             'Can disable diagnostic settings if storage costs are a concern'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: Logs not appearing | Solution: Check diagnostic settings configuration and permissions'
             'Issue: Retention too short | Solution: Configure Log Analytics for longer retention'
             'Issue: High costs | Solution: Optimize log categories and retention policies'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/identity/monitoring-health/howto-integrate-activity-logs-with-azure-monitor-logs'
             'https://learn.microsoft.com/entra/identity/monitoring-health/concept-audit-logs'
         )
     }
 
-    'GlobalAdmin_Multiple'      = @{
-        Title           = 'Reduce Number of Global Administrators'
-        Summary         = 'Limit Global Administrator role to minimum required accounts (recommended: 2-4)'
-        Impact          = @{
+    'GlobalAdmin_Multiple' = @{
+        Title = 'Reduce Number of Global Administrators'
+        Summary = 'Limit Global Administrator role to minimum required accounts (recommended: 2-4)'
+        Impact = @{
             Positive = 'Reduces attack surface; Limits privilege escalation risk; Compliance alignment'
             Negative = 'May require role re-assignment; Users lose some access initially'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Global Administrator role'
             'Review of current Global Admins and their needs'
             'Alternative role mapping (User Admin, Security Admin, etc.)'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Identity > Roles & admins > Roles & admins'
             '3. Click "Global Administrator" role'
@@ -457,39 +457,39 @@ New-MgDirectoryRoleMemberByRef -DirectoryRoleId $userAdminRole.Id -BodyParameter
 # Remove from Global Administrator (only after verifying alternative access)
 # Remove-MgDirectoryRoleMemberByRef -DirectoryRoleId $globalAdminRole.Id -DirectoryObjectId $userId
 '@
-        Verification    = @(
+        Verification = @(
             'Verify Global Admin count reduced to 2-4 active users'
             'Test that reassigned users can still perform their job functions'
             'Verify emergency access accounts are properly configured'
             'Document who has Global Admin access and why'
         )
-        Rollback        = @(
+        Rollback = @(
             'Re-assign Global Administrator role if needed'
             'Maintain list of previous Global Admins for quick restoration'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: User cannot perform task | Solution: Assign additional specific role (e.g., Exchange Admin)'
             'Issue: Too restrictive | Solution: Use Privileged Identity Management (PIM) for just-in-time access'
             'Issue: Compliance audit failure | Solution: Document all Global Admins with business justification'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/identity/role-based-access-control/best-practices'
             'https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference'
         )
     }
 
     'SecurityDefaults_Disabled' = @{
-        Title           = 'Enable Security Defaults (If Not Using Conditional Access)'
-        Summary         = 'Enable baseline security controls for organizations without Conditional Access'
-        Impact          = @{
+        Title = 'Enable Security Defaults (If Not Using Conditional Access)'
+        Summary = 'Enable baseline security controls for organizations without Conditional Access'
+        Impact = @{
             Positive = 'Free baseline security; Enforces MFA for admins; Blocks legacy auth'
             Negative = 'Less flexible than Conditional Access; All-or-nothing approach'
         }
-        Prerequisites   = @(
+        Prerequisites = @(
             'Global Administrator role'
             'No Conditional Access policies in place (Security Defaults and CA are mutually exclusive)'
         )
-        StepsPortal     = @(
+        StepsPortal = @(
             '1. Sign in to Azure AD portal (https://entra.microsoft.com)'
             '2. Navigate to Identity > Overview > Properties'
             '3. Click "Manage security defaults"'
@@ -510,19 +510,19 @@ Update-MgPolicyIdentitySecurityDefaultEnforcementPolicy -BodyParameter $params
 # Verify status
 Get-MgPolicyIdentitySecurityDefaultEnforcementPolicy | Select-Object IsEnabled
 '@
-        Verification    = @(
+        Verification = @(
             'Verify Security Defaults is enabled'
             'Test admin MFA requirement'
             'Verify legacy auth is blocked'
         )
-        Rollback        = @(
+        Rollback = @(
             'Disable Security Defaults via portal or PowerShell'
         )
-        CommonIssues    = @(
+        CommonIssues = @(
             'Issue: Cannot enable with Conditional Access | Solution: Choose one approach (CA recommended for enterprises)'
             'Issue: Too restrictive | Solution: Consider upgrading to Azure AD P1 and using Conditional Access instead'
         )
-        References      = @(
+        References = @(
             'https://learn.microsoft.com/entra/fundamentals/security-defaults'
         )
     }
@@ -546,6 +546,7 @@ function Get-RemediationGuidance {
     .EXAMPLE
         Get-RemediationGuidance -FindingType "MFA_Disabled"
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -558,19 +559,19 @@ function Get-RemediationGuidance {
 
     # Return generic guidance if specific guidance not available
     return @{
-        Title           = "Remediation Required"
-        Summary         = "Please review this finding and implement appropriate controls"
-        Impact          = @{
+        Title = "Remediation Required"
+        Summary = "Please review this finding and implement appropriate controls"
+        Impact = @{
             Positive = "Improved security posture"
             Negative = "May require configuration changes"
         }
-        Prerequisites   = @("Administrative access required")
-        StepsPortal     = @("Refer to Microsoft documentation for specific guidance")
+        Prerequisites = @("Administrative access required")
+        StepsPortal = @("Refer to Microsoft documentation for specific guidance")
         StepsPowerShell = "# No automated remediation available"
-        Verification    = @("Verify the security control is in place")
-        Rollback        = @("Review changes before implementing")
-        CommonIssues    = @("Consult Microsoft documentation")
-        References      = @("https://learn.microsoft.com/entra/")
+        Verification = @("Verify the security control is in place")
+        Rollback = @("Review changes before implementing")
+        CommonIssues = @("Consult Microsoft documentation")
+        References = @("https://learn.microsoft.com/entra/")
     }
 }
 
@@ -651,8 +652,8 @@ function Format-RemediationSteps {
 
                 $output += "<div class='impact'>"
                 $output += "<h4>Impact Analysis</h4>"
-                $output += "<p><strong>Positive:</strong> $($guidance.Impact.Positive)</p>"
-                $output += "<p><strong>Considerations:</strong> $($guidance.Impact.Negative)</p>"
+                $output += "- [+] Positive: $($guidance.Impact.Positive)"
+                $output += "- [!] Considerations: $($guidance.Impact.Negative)"
                 $output += "</div>"
             }
 
@@ -681,8 +682,8 @@ function Format-RemediationSteps {
                 $output += "**Summary:** $($guidance.Summary)"
                 $output += ""
                 $output += "**Impact:**"
-                $output += "- âœ… Positive: $($guidance.Impact.Positive)"
-                $output += "- âš ï¸ Considerations: $($guidance.Impact.Negative)"
+                $output += "- [+] Positive: $($guidance.Impact.Positive)"
+                $output += "- [!] Considerations: $($guidance.Impact.Negative)"
                 $output += ""
             }
 

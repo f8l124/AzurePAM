@@ -30,7 +30,12 @@ $script:ModuleName = "EntraChecks-DeltaReporting"
 
 #region ==================== MODULE INITIALIZATION ====================
 
+<#
+.SYNOPSIS
+    Initializes the delta reporting module for compliance snapshot comparison.
+#>
 function Initialize-DeltaReportingModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -429,6 +434,7 @@ function Get-ComplianceSnapshots {
     Delta analysis object.
 #>
 function Compare-ComplianceSnapshots {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -655,8 +661,8 @@ function Compare-ComplianceSnapshots {
     $regressionScore = $delta.Summary.ScoreRegressions + $delta.Summary.RegressionCount + $delta.Summary.NewIssueCount
     
     $delta.Summary.OverallTrend = if ($improvementScore -gt $regressionScore) { "improving" }
-                                   elseif ($regressionScore -gt $improvementScore) { "declining" }
-                                   else { "stable" }
+    elseif ($regressionScore -gt $improvementScore) { "declining" }
+    else { "stable" }
     
     Write-Host "`n[+] Overall Trend: " -NoNewline -ForegroundColor Magenta
     $trendColor = switch ($delta.Summary.OverallTrend) {
@@ -687,6 +693,7 @@ function Compare-ComplianceSnapshots {
     Directory for output files.
 #>
 function Export-DeltaReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -975,8 +982,8 @@ function Export-DeltaReport {
                 default { "neutral" }
             }
             $changeText = if ($score.Change -gt 0) { "+$([math]::Round($score.Change, 1))%" } 
-                         elseif ($score.Change -lt 0) { "$([math]::Round($score.Change, 1))%" }
-                         else { "0%" }
+            elseif ($score.Change -lt 0) { "$([math]::Round($score.Change, 1))%" }
+            else { "0%" }
             
             $displayName = switch ($scoreKey) {
                 "SecureScore" { "Microsoft Secure Score" }
@@ -1099,28 +1106,28 @@ function Export-DeltaReport {
     # Export CSV - Summary
     $csvSummaryPath = Join-Path $OutputDirectory "DeltaReport-Summary-$timestamp.csv"
     @([PSCustomObject]@{
-        BaselineSnapshot = $DeltaData.BaselineSnapshot
-        BaselineDate = $DeltaData.BaselineDate
-        CurrentSnapshot = $DeltaData.CurrentSnapshot
-        CurrentDate = $DeltaData.CurrentDate
-        OverallTrend = $DeltaData.Summary.OverallTrend
-        NewIssues = $DeltaData.Summary.NewIssueCount
-        ResolvedIssues = $DeltaData.Summary.ResolvedIssueCount
-        Improvements = $DeltaData.Summary.ImprovementCount
-        Regressions = $DeltaData.Summary.RegressionCount
-        SecureScore_Baseline = $DeltaData.ScoreChanges.SecureScore.Baseline
-        SecureScore_Current = $DeltaData.ScoreChanges.SecureScore.Current
-        SecureScore_Change = $DeltaData.ScoreChanges.SecureScore.Change
-        Defender_Baseline = $DeltaData.ScoreChanges.DefenderCompliance.Baseline
-        Defender_Current = $DeltaData.ScoreChanges.DefenderCompliance.Current
-        Defender_Change = $DeltaData.ScoreChanges.DefenderCompliance.Change
-        AzurePolicy_Baseline = $DeltaData.ScoreChanges.AzurePolicy.Baseline
-        AzurePolicy_Current = $DeltaData.ScoreChanges.AzurePolicy.Current
-        AzurePolicy_Change = $DeltaData.ScoreChanges.AzurePolicy.Change
-        Purview_Baseline = $DeltaData.ScoreChanges.PurviewCompliance.Baseline
-        Purview_Current = $DeltaData.ScoreChanges.PurviewCompliance.Current
-        Purview_Change = $DeltaData.ScoreChanges.PurviewCompliance.Change
-    }) | Export-Csv -Path $csvSummaryPath -NoTypeInformation -Encoding UTF8
+            BaselineSnapshot = $DeltaData.BaselineSnapshot
+            BaselineDate = $DeltaData.BaselineDate
+            CurrentSnapshot = $DeltaData.CurrentSnapshot
+            CurrentDate = $DeltaData.CurrentDate
+            OverallTrend = $DeltaData.Summary.OverallTrend
+            NewIssues = $DeltaData.Summary.NewIssueCount
+            ResolvedIssues = $DeltaData.Summary.ResolvedIssueCount
+            Improvements = $DeltaData.Summary.ImprovementCount
+            Regressions = $DeltaData.Summary.RegressionCount
+            SecureScore_Baseline = $DeltaData.ScoreChanges.SecureScore.Baseline
+            SecureScore_Current = $DeltaData.ScoreChanges.SecureScore.Current
+            SecureScore_Change = $DeltaData.ScoreChanges.SecureScore.Change
+            Defender_Baseline = $DeltaData.ScoreChanges.DefenderCompliance.Baseline
+            Defender_Current = $DeltaData.ScoreChanges.DefenderCompliance.Current
+            Defender_Change = $DeltaData.ScoreChanges.DefenderCompliance.Change
+            AzurePolicy_Baseline = $DeltaData.ScoreChanges.AzurePolicy.Baseline
+            AzurePolicy_Current = $DeltaData.ScoreChanges.AzurePolicy.Current
+            AzurePolicy_Change = $DeltaData.ScoreChanges.AzurePolicy.Change
+            Purview_Baseline = $DeltaData.ScoreChanges.PurviewCompliance.Baseline
+            Purview_Current = $DeltaData.ScoreChanges.PurviewCompliance.Current
+            Purview_Change = $DeltaData.ScoreChanges.PurviewCompliance.Change
+        }) | Export-Csv -Path $csvSummaryPath -NoTypeInformation -Encoding UTF8
     Write-Host "    [OK] Summary CSV: $csvSummaryPath" -ForegroundColor Green
     
     # Export CSV - All Changes
@@ -1195,6 +1202,7 @@ function Export-DeltaReport {
     Trend analysis object.
 #>
 function Get-ComplianceTrend {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -1207,8 +1215,8 @@ function Get-ComplianceTrend {
     Write-Host "`n[+] Analyzing compliance trends..." -ForegroundColor Cyan
     
     $snapshots = Get-ComplianceSnapshots -SnapshotDirectory $SnapshotDirectory | 
-                 Select-Object -First $MaxSnapshots |
-                 Sort-Object CreatedAt
+        Select-Object -First $MaxSnapshots |
+        Sort-Object CreatedAt
     
     if ($snapshots.Count -lt 2) {
         Write-Host "    [!] Need at least 2 snapshots for trend analysis" -ForegroundColor Yellow
@@ -1293,4 +1301,4 @@ Export-ModuleMember -Function @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-DeltaReportingModule
+$null = Initialize-DeltaReportingModule

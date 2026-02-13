@@ -20,7 +20,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Running PSScriptAnalyzer code quality check..." -ForegroundColor Cyan
-          .\Invoke-CodeQualityCheck.ps1 -FailOnErrors -ExportResults
+          .\Scripts\Invoke-CodeQualityCheck.ps1 -FailOnErrors -ExportResults
 
       - name: Upload Code Quality Reports
         if: always()
@@ -33,35 +33,33 @@ jobs:
       - name: Comment PR with Results
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v6
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
             const reportPath = 'CodeQualityReports';
-
-            // Find the latest JSON report
             const files = fs.readdirSync(reportPath);
             const jsonFile = files.find(f => f.endsWith('.json'));
-
             if (jsonFile) {
-              const report = JSON.parse(fs.readFileSync(`${reportPath}/${jsonFile}`, 'utf8'));
-
+              const report = JSON.parse(fs.readFileSync(reportPath + '/' + jsonFile, 'utf8'));
               const summary = report.Summary;
-              const status = summary.Errors === 0 ? '✅ PASS' : '❌ FAIL';
-
-              const body = `## Code Quality Check ${status}
-
-**Summary:**
-- Files Analyzed: ${summary.FilesAnalyzed}
-- Files with Issues: ${summary.FilesWithIssues}
-- **Errors:** ${summary.Errors} 🔴
-- **Warnings:** ${summary.Warnings} ⚠️
-- **Total Issues:** ${summary.TotalIssues}
-
-${summary.Errors > 0 ? '⚠️ **This PR introduces code quality errors that must be fixed before merging.**' : ''}
-
-[View detailed report in artifacts](https://github.com/${{github.repository}}/actions/runs/${{github.run_id}})
-`;
-
+              const status = summary.Errors === 0 ? 'PASS' : 'FAIL';
+              const warning = summary.Errors > 0
+                ? '\n\n> **This PR introduces code quality errors that must be fixed before merging.**'
+                : '';
+              const body = '## Code Quality Check ' + status + '\n\n'
+                + '| Metric | Count |\n'
+                + '|--------|------:|\n'
+                + '| Files Analyzed | ' + summary.FilesAnalyzed + ' |\n'
+                + '| Files with Issues | ' + summary.FilesWithIssues + ' |\n'
+                + '| Errors | ' + summary.Errors + ' |\n'
+                + '| Warnings | ' + summary.Warnings + ' |\n'
+                + '| Total Issues | ' + summary.TotalIssues + ' |'
+                + warning + '\n\n'
+                + '[View detailed report](https://github.com/'
+                + process.env.REPO + '/actions/runs/' + process.env.RUN_ID + ')';
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,

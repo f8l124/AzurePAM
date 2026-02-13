@@ -127,7 +127,12 @@ $script:WellKnownInitiatives = @{
 
 #region ==================== MODULE INITIALIZATION ====================
 
+<#
+.SYNOPSIS
+    Initializes the Azure Policy compliance module and verifies required Az modules.
+#>
 function Initialize-AzurePolicyModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -232,6 +237,7 @@ function Get-InitiativeFrameworkInfo {
     Converts Azure Policy compliance state to standard status.
 #>
 function ConvertTo-PolicyStatus {
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [string]$ComplianceState
@@ -565,6 +571,7 @@ function Get-PolicyRemediationTasks {
     Standardized compliance data object.
 #>
 function Get-AzurePolicyComplianceAssessment {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -709,8 +716,8 @@ function Get-AzurePolicyComplianceAssessment {
             
             $allResults.Summary.TotalPolicies += $policyGroups.Count
             $allResults.Summary.CompliantPolicies += ($policyGroups | Where-Object { 
-                ($_.Group | Where-Object { $_.ComplianceState -eq "Failed" }).Count -eq 0 
-            }).Count
+                    ($_.Group | Where-Object { $_.ComplianceState -eq "Failed" }).Count -eq 0 
+                }).Count
         }
         
         # Get non-compliant resources if requested
@@ -780,6 +787,7 @@ function Get-AzurePolicyComplianceAssessment {
     Name of the tenant/organization.
 #>
 function Export-AzurePolicyReport {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter()]
@@ -1141,16 +1149,16 @@ function Export-AzurePolicyReport {
     # Export CSV - Summary
     $csvSummaryPath = Join-Path $OutputDirectory "AzurePolicy-Summary-$timestamp.csv"
     @([PSCustomObject]@{
-        Tenant = $TenantName
-        AssessmentDate = $PolicyData.AssessmentDate
-        TotalSubscriptions = $PolicyData.Summary.TotalSubscriptions
-        TotalAssignments = $PolicyData.Summary.TotalAssignments
-        TotalPolicies = $PolicyData.Summary.TotalPolicies
-        CompliantPolicies = $PolicyData.Summary.CompliantPolicies
-        NonCompliantPolicies = $PolicyData.Summary.NonCompliantPolicies
-        NonCompliantResources = $PolicyData.Summary.NonCompliantResources
-        OverallCompliance = "$overallCompliance%"
-    }) | Export-Csv -Path $csvSummaryPath -NoTypeInformation -Encoding UTF8
+            Tenant = $TenantName
+            AssessmentDate = $PolicyData.AssessmentDate
+            TotalSubscriptions = $PolicyData.Summary.TotalSubscriptions
+            TotalAssignments = $PolicyData.Summary.TotalAssignments
+            TotalPolicies = $PolicyData.Summary.TotalPolicies
+            CompliantPolicies = $PolicyData.Summary.CompliantPolicies
+            NonCompliantPolicies = $PolicyData.Summary.NonCompliantPolicies
+            NonCompliantResources = $PolicyData.Summary.NonCompliantResources
+            OverallCompliance = "$overallCompliance%"
+        }) | Export-Csv -Path $csvSummaryPath -NoTypeInformation -Encoding UTF8
     Write-Host "    [OK] Summary CSV: $csvSummaryPath" -ForegroundColor Green
     
     # Export non-compliant resources if available
@@ -1194,4 +1202,4 @@ Export-ModuleMember -Variable @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-AzurePolicyModule
+$null = Initialize-AzurePolicyModule

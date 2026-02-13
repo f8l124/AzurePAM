@@ -22,90 +22,90 @@
 # CIS Microsoft 365 Foundations Benchmark mappings
 $Script:CISMicrosoft365Mapping = @{
     # Identity and Access Management
-    'MFA_Disabled'                      = @{
-        Controls    = @('1.1.3', '1.3.1')
-        Title       = 'Ensure multifactor authentication is enabled for all users'
+    'MFA_Disabled' = @{
+        Controls = @('1.1.3', '1.3.1')
+        Title = 'Ensure multifactor authentication is enabled for all users'
         Description = 'MFA provides additional security for user accounts'
     }
-    'MFA_AdminDisabled'                 = @{
-        Controls    = @('1.1.1', '1.1.3')
-        Title       = 'Ensure multifactor authentication is enabled for all admin users'
+    'MFA_AdminDisabled' = @{
+        Controls = @('1.1.1', '1.1.3')
+        Title = 'Ensure multifactor authentication is enabled for all admin users'
         Description = 'Administrative accounts require MFA protection'
     }
-    'ConditionalAccess_Missing'         = @{
-        Controls    = @('1.1.1', '1.1.3', '2.1.1')
-        Title       = 'Ensure Conditional Access policies are configured'
+    'ConditionalAccess_Missing' = @{
+        Controls = @('1.1.1', '1.1.3', '2.1.1')
+        Title = 'Ensure Conditional Access policies are configured'
         Description = 'Conditional Access provides risk-based access control'
     }
-    'LegacyAuth_Enabled'                = @{
-        Controls    = @('1.1.4')
-        Title       = 'Ensure legacy authentication protocols are blocked'
+    'LegacyAuth_Enabled' = @{
+        Controls = @('1.1.4')
+        Title = 'Ensure legacy authentication protocols are blocked'
         Description = 'Legacy protocols do not support MFA'
     }
-    'PasswordExpiry_Disabled'           = @{
-        Controls    = @('1.1.5')
-        Title       = 'Ensure password expiration is appropriately configured'
+    'PasswordExpiry_Disabled' = @{
+        Controls = @('1.1.5')
+        Title = 'Ensure password expiration is appropriately configured'
         Description = 'Password policies should align with modern guidance'
     }
     'SelfServicePasswordReset_Disabled' = @{
-        Controls    = @('1.1.7')
-        Title       = 'Ensure self-service password reset is enabled'
+        Controls = @('1.1.7')
+        Title = 'Ensure self-service password reset is enabled'
         Description = 'SSPR reduces helpdesk burden and improves security'
     }
-    'AdminRoles_Excessive'              = @{
-        Controls    = @('1.2.1', '1.2.2')
-        Title       = 'Ensure administrative roles are assigned to fewer than 5 users'
+    'AdminRoles_Excessive' = @{
+        Controls = @('1.2.1', '1.2.2')
+        Title = 'Ensure administrative roles are assigned to fewer than 5 users'
         Description = 'Limit administrative access to minimum necessary users'
     }
-    'GlobalAdmin_Multiple'              = @{
-        Controls    = @('1.2.1')
-        Title       = 'Ensure the global admin role is assigned to fewer than 5 users'
+    'GlobalAdmin_Multiple' = @{
+        Controls = @('1.2.1')
+        Title = 'Ensure the global admin role is assigned to fewer than 5 users'
         Description = 'Global admins have unrestricted access'
     }
-    'GuestAccess_Unrestricted'          = @{
-        Controls    = @('1.3.1', '1.3.3')
-        Title       = 'Ensure guest users are reviewed regularly'
+    'GuestAccess_Unrestricted' = @{
+        Controls = @('1.3.1', '1.3.3')
+        Title = 'Ensure guest users are reviewed regularly'
         Description = 'Guest access should be monitored and controlled'
     }
 
     # Application Permissions
-    'AppPermissions_Excessive'          = @{
-        Controls    = @('3.1.1', '3.1.2')
-        Title       = 'Ensure application permissions are reviewed regularly'
+    'AppPermissions_Excessive' = @{
+        Controls = @('3.1.1', '3.1.2')
+        Title = 'Ensure application permissions are reviewed regularly'
         Description = 'Applications should have minimum required permissions'
     }
-    'AppConsent_UserAllowed'            = @{
-        Controls    = @('3.1.4')
-        Title       = 'Ensure user consent for applications is restricted'
+    'AppConsent_UserAllowed' = @{
+        Controls = @('3.1.4')
+        Title = 'Ensure user consent for applications is restricted'
         Description = 'Prevent users from consenting to risky applications'
     }
 
     # Data Protection
-    'DLP_NotConfigured'                 = @{
-        Controls    = @('2.1.6')
-        Title       = 'Ensure DLP policies are enabled'
+    'DLP_NotConfigured' = @{
+        Controls = @('2.1.6')
+        Title = 'Ensure DLP policies are enabled'
         Description = 'Data Loss Prevention protects sensitive information'
     }
-    'AuditLog_NotEnabled'               = @{
-        Controls    = @('2.1.1', '6.1.1')
-        Title       = 'Ensure audit logging is enabled'
+    'AuditLog_NotEnabled' = @{
+        Controls = @('2.1.1', '6.1.1')
+        Title = 'Ensure audit logging is enabled'
         Description = 'Audit logs are critical for security monitoring'
     }
-    'MailboxAudit_Disabled'             = @{
-        Controls    = @('2.1.2')
-        Title       = 'Ensure mailbox auditing is enabled'
+    'MailboxAudit_Disabled' = @{
+        Controls = @('2.1.2')
+        Title = 'Ensure mailbox auditing is enabled'
         Description = 'Mailbox audit logs track access and changes'
     }
 
     # Security Defaults
-    'SecurityDefaults_Disabled'         = @{
-        Controls    = @('1.1.1')
-        Title       = 'Ensure Security Defaults is enabled if Conditional Access is not used'
+    'SecurityDefaults_Disabled' = @{
+        Controls = @('1.1.1')
+        Title = 'Ensure Security Defaults is enabled if Conditional Access is not used'
         Description = 'Security Defaults provide baseline protection'
     }
-    'RiskySignIn_NoPolicy'              = @{
-        Controls    = @('1.1.2')
-        Title       = 'Ensure sign-in risk policy is configured'
+    'RiskySignIn_NoPolicy' = @{
+        Controls = @('1.1.2')
+        Title = 'Ensure sign-in risk policy is configured'
         Description = 'Risk-based policies respond to suspicious activity'
     }
 }
@@ -113,68 +113,68 @@ $Script:CISMicrosoft365Mapping = @{
 # NIST Cybersecurity Framework mappings
 $Script:NISTCSFMapping = @{
     # Identify
-    'MFA_Disabled'                      = @{
-        Functions   = @('PR.AC-1', 'PR.AC-7')
+    'MFA_Disabled' = @{
+        Functions = @('PR.AC-1', 'PR.AC-7')
         Description = 'Identities and credentials are managed (PR.AC-1); Users, devices, and assets are authenticated (PR.AC-7)'
     }
-    'MFA_AdminDisabled'                 = @{
-        Functions   = @('PR.AC-1', 'PR.AC-4', 'PR.AC-7')
+    'MFA_AdminDisabled' = @{
+        Functions = @('PR.AC-1', 'PR.AC-4', 'PR.AC-7')
         Description = 'Identities and credentials are managed; Access permissions are managed; Authentication and authorization'
     }
-    'ConditionalAccess_Missing'         = @{
-        Functions   = @('PR.AC-3', 'PR.AC-4', 'PR.AC-6')
+    'ConditionalAccess_Missing' = @{
+        Functions = @('PR.AC-3', 'PR.AC-4', 'PR.AC-6')
         Description = 'Remote access is managed; Access permissions are managed; Identity is proofed and bound'
     }
-    'LegacyAuth_Enabled'                = @{
-        Functions   = @('PR.AC-7', 'DE.CM-7')
+    'LegacyAuth_Enabled' = @{
+        Functions = @('PR.AC-7', 'DE.CM-7')
         Description = 'Authentication and authorization; Monitoring for unauthorized activity'
     }
-    'AdminRoles_Excessive'              = @{
-        Functions   = @('PR.AC-4', 'PR.AC-1')
+    'AdminRoles_Excessive' = @{
+        Functions = @('PR.AC-4', 'PR.AC-1')
         Description = 'Access permissions and authorizations are managed and enforced'
     }
-    'GlobalAdmin_Multiple'              = @{
-        Functions   = @('PR.AC-4', 'PR.AC-1')
+    'GlobalAdmin_Multiple' = @{
+        Functions = @('PR.AC-4', 'PR.AC-1')
         Description = 'Access permissions are managed, incorporating principles of least privilege'
     }
-    'GuestAccess_Unrestricted'          = @{
-        Functions   = @('PR.AC-3', 'PR.AC-4', 'ID.AM-5')
+    'GuestAccess_Unrestricted' = @{
+        Functions = @('PR.AC-3', 'PR.AC-4', 'ID.AM-5')
         Description = 'Remote access managed; Access permissions managed; Resources prioritized'
     }
-    'AppPermissions_Excessive'          = @{
-        Functions   = @('PR.AC-4', 'ID.AM-2')
+    'AppPermissions_Excessive' = @{
+        Functions = @('PR.AC-4', 'ID.AM-2')
         Description = 'Access permissions and authorizations are managed; Software platforms identified'
     }
-    'AppConsent_UserAllowed'            = @{
-        Functions   = @('PR.AC-4', 'PR.PT-3')
+    'AppConsent_UserAllowed' = @{
+        Functions = @('PR.AC-4', 'PR.PT-3')
         Description = 'Access permissions managed; Principle of least functionality'
     }
-    'DLP_NotConfigured'                 = @{
-        Functions   = @('PR.DS-5', 'DE.CM-7')
+    'DLP_NotConfigured' = @{
+        Functions = @('PR.DS-5', 'DE.CM-7')
         Description = 'Protections against data leaks; Monitoring for unauthorized activity'
     }
-    'AuditLog_NotEnabled'               = @{
-        Functions   = @('DE.AE-3', 'DE.CM-1', 'PR.PT-1')
+    'AuditLog_NotEnabled' = @{
+        Functions = @('DE.AE-3', 'DE.CM-1', 'PR.PT-1')
         Description = 'Event data aggregated and correlated; Network monitored; Audit/log records determined'
     }
-    'MailboxAudit_Disabled'             = @{
-        Functions   = @('DE.AE-3', 'DE.CM-1')
+    'MailboxAudit_Disabled' = @{
+        Functions = @('DE.AE-3', 'DE.CM-1')
         Description = 'Event data aggregated; Network and environment monitored'
     }
-    'SecurityDefaults_Disabled'         = @{
-        Functions   = @('PR.AC-1', 'PR.AC-7', 'PR.IP-1')
+    'SecurityDefaults_Disabled' = @{
+        Functions = @('PR.AC-1', 'PR.AC-7', 'PR.IP-1')
         Description = 'Identity management; Authentication; Baseline configuration established'
     }
-    'RiskySignIn_NoPolicy'              = @{
-        Functions   = @('DE.CM-7', 'RS.AN-1', 'PR.AC-7')
+    'RiskySignIn_NoPolicy' = @{
+        Functions = @('DE.CM-7', 'RS.AN-1', 'PR.AC-7')
         Description = 'Monitoring for unauthorized activity; Notifications analyzed; Authentication'
     }
-    'PasswordExpiry_Disabled'           = @{
-        Functions   = @('PR.AC-1')
+    'PasswordExpiry_Disabled' = @{
+        Functions = @('PR.AC-1')
         Description = 'Identities and credentials are issued, managed, verified, revoked'
     }
     'SelfServicePasswordReset_Disabled' = @{
-        Functions   = @('PR.AC-1')
+        Functions = @('PR.AC-1')
         Description = 'Identities and credentials are managed for authorized users'
     }
 }
@@ -182,137 +182,137 @@ $Script:NISTCSFMapping = @{
 # SOC 2 Trust Services Criteria mappings
 $Script:SOC2Mapping = @{
     # Common Criteria (CC)
-    'MFA_Disabled'                      = @{
-        Criteria    = @('CC6.1', 'CC6.2')
+    'MFA_Disabled' = @{
+        Criteria = @('CC6.1', 'CC6.2')
         Description = 'Logical and physical access controls; Prior to issuing credentials, registration and authorization are completed'
     }
-    'MFA_AdminDisabled'                 = @{
-        Criteria    = @('CC6.1', 'CC6.2', 'CC6.3')
+    'MFA_AdminDisabled' = @{
+        Criteria = @('CC6.1', 'CC6.2', 'CC6.3')
         Description = 'Access controls; Credential management; Privileged access management'
     }
-    'ConditionalAccess_Missing'         = @{
-        Criteria    = @('CC6.1', 'CC6.6')
+    'ConditionalAccess_Missing' = @{
+        Criteria = @('CC6.1', 'CC6.6')
         Description = 'Logical and physical access controls; Access is modified or removed upon role changes'
     }
-    'LegacyAuth_Enabled'                = @{
-        Criteria    = @('CC6.1', 'CC6.6', 'CC7.2')
+    'LegacyAuth_Enabled' = @{
+        Criteria = @('CC6.1', 'CC6.6', 'CC7.2')
         Description = 'Access controls; Security configurations; System monitoring'
     }
-    'AdminRoles_Excessive'              = @{
-        Criteria    = @('CC6.1', 'CC6.3')
+    'AdminRoles_Excessive' = @{
+        Criteria = @('CC6.1', 'CC6.3')
         Description = 'Access controls restricted to authorized users; Privileged access management'
     }
-    'GlobalAdmin_Multiple'              = @{
-        Criteria    = @('CC6.3')
+    'GlobalAdmin_Multiple' = @{
+        Criteria = @('CC6.3')
         Description = 'Users with administrative privileges are restricted and managed'
     }
-    'GuestAccess_Unrestricted'          = @{
-        Criteria    = @('CC6.1', 'CC6.2', 'CC6.6')
+    'GuestAccess_Unrestricted' = @{
+        Criteria = @('CC6.1', 'CC6.2', 'CC6.6')
         Description = 'Access controls; Credential issuance; Access review and removal'
     }
-    'AppPermissions_Excessive'          = @{
-        Criteria    = @('CC6.1', 'CC6.3')
+    'AppPermissions_Excessive' = @{
+        Criteria = @('CC6.1', 'CC6.3')
         Description = 'Logical access controls; System authorizations appropriate for user roles'
     }
-    'AppConsent_UserAllowed'            = @{
-        Criteria    = @('CC6.1', 'CC6.3')
+    'AppConsent_UserAllowed' = @{
+        Criteria = @('CC6.1', 'CC6.3')
         Description = 'Access controls; Authorization management'
     }
-    'DLP_NotConfigured'                 = @{
-        Criteria    = @('CC6.7', 'CC6.1')
+    'DLP_NotConfigured' = @{
+        Criteria = @('CC6.7', 'CC6.1')
         Description = 'Data classification and protection; Access to sensitive data restricted'
     }
-    'AuditLog_NotEnabled'               = @{
-        Criteria    = @('CC7.2', 'CC7.3')
+    'AuditLog_NotEnabled' = @{
+        Criteria = @('CC7.2', 'CC7.3')
         Description = 'System monitoring; Security events logged and analyzed'
     }
-    'MailboxAudit_Disabled'             = @{
-        Criteria    = @('CC7.2', 'CC7.3')
+    'MailboxAudit_Disabled' = @{
+        Criteria = @('CC7.2', 'CC7.3')
         Description = 'System monitoring; Audit logging for security-relevant events'
     }
-    'SecurityDefaults_Disabled'         = @{
-        Criteria    = @('CC6.1', 'CC7.1')
+    'SecurityDefaults_Disabled' = @{
+        Criteria = @('CC6.1', 'CC7.1')
         Description = 'Access controls; Security baseline configuration'
     }
-    'RiskySignIn_NoPolicy'              = @{
-        Criteria    = @('CC7.2', 'CC7.3')
+    'RiskySignIn_NoPolicy' = @{
+        Criteria = @('CC7.2', 'CC7.3')
         Description = 'System monitoring; Security events detected and analyzed'
     }
-    'PasswordExpiry_Disabled'           = @{
-        Criteria    = @('CC6.1', 'CC6.2')
+    'PasswordExpiry_Disabled' = @{
+        Criteria = @('CC6.1', 'CC6.2')
         Description = 'Access controls; Credential management'
     }
     'SelfServicePasswordReset_Disabled' = @{
-        Criteria    = @('CC6.1', 'CC6.2')
+        Criteria = @('CC6.1', 'CC6.2')
         Description = 'Access controls; Credential management and recovery'
     }
 }
 
 # PCI-DSS v4.0.1 mappings
 $Script:PCIDSS4Mapping = @{
-    'MFA_Disabled'                      = @{
+    'MFA_Disabled' = @{
         Requirements = @('8.4.2', '8.5.1')
-        Description  = 'MFA implemented for access; Authentication factors validated'
+        Description = 'MFA implemented for access; Authentication factors validated'
     }
-    'MFA_AdminDisabled'                 = @{
+    'MFA_AdminDisabled' = @{
         Requirements = @('8.4.2', '8.4.3', '7.2.2')
-        Description  = 'MFA for all access; MFA for administrative access; Privileged access management'
+        Description = 'MFA for all access; MFA for administrative access; Privileged access management'
     }
-    'ConditionalAccess_Missing'         = @{
+    'ConditionalAccess_Missing' = @{
         Requirements = @('8.2.1', '8.3.1')
-        Description  = 'User identity verified; Authentication factors unique; Risk-based controls'
+        Description = 'User identity verified; Authentication factors unique; Risk-based controls'
     }
-    'LegacyAuth_Enabled'                = @{
+    'LegacyAuth_Enabled' = @{
         Requirements = @('8.4.2', '8.3.8')
-        Description  = 'Strong authentication required; Security policies enforced'
+        Description = 'Strong authentication required; Security policies enforced'
     }
-    'AdminRoles_Excessive'              = @{
+    'AdminRoles_Excessive' = @{
         Requirements = @('7.2.2', '7.2.3')
-        Description  = 'Privileged access assigned based on job function; Access limited to least privilege'
+        Description = 'Privileged access assigned based on job function; Access limited to least privilege'
     }
-    'GlobalAdmin_Multiple'              = @{
+    'GlobalAdmin_Multiple' = @{
         Requirements = @('7.2.2', '7.2.4')
-        Description  = 'Privileged access managed; Access reviewed regularly'
+        Description = 'Privileged access managed; Access reviewed regularly'
     }
-    'GuestAccess_Unrestricted'          = @{
+    'GuestAccess_Unrestricted' = @{
         Requirements = @('7.2.1', '7.2.4', '8.2.2')
-        Description  = 'Access control system configured; Access reviewed; User accounts managed'
+        Description = 'Access control system configured; Access reviewed; User accounts managed'
     }
-    'AppPermissions_Excessive'          = @{
+    'AppPermissions_Excessive' = @{
         Requirements = @('7.2.2', '7.2.5')
-        Description  = 'Access privileges assigned; Application and system accounts managed'
+        Description = 'Access privileges assigned; Application and system accounts managed'
     }
-    'AppConsent_UserAllowed'            = @{
+    'AppConsent_UserAllowed' = @{
         Requirements = @('7.2.2', '6.4.2')
-        Description  = 'Access privileges validated; Applications meet security requirements'
+        Description = 'Access privileges validated; Applications meet security requirements'
     }
-    'DLP_NotConfigured'                 = @{
+    'DLP_NotConfigured' = @{
         Requirements = @('3.5.1', '4.2.1')
-        Description  = 'Primary Account Number rendered unreadable; Strong cryptography and security protocols'
+        Description = 'Primary Account Number rendered unreadable; Strong cryptography and security protocols'
     }
-    'AuditLog_NotEnabled'               = @{
+    'AuditLog_NotEnabled' = @{
         Requirements = @('10.2.1', '10.2.2', '10.3.1')
-        Description  = 'Audit logs implemented; Audit trail for all access; Audit log entries recorded'
+        Description = 'Audit logs implemented; Audit trail for all access; Audit log entries recorded'
     }
-    'MailboxAudit_Disabled'             = @{
+    'MailboxAudit_Disabled' = @{
         Requirements = @('10.2.1', '10.2.2')
-        Description  = 'Audit logs capture all access; User activities logged'
+        Description = 'Audit logs capture all access; User activities logged'
     }
-    'SecurityDefaults_Disabled'         = @{
+    'SecurityDefaults_Disabled' = @{
         Requirements = @('8.4.2', '2.2.1')
-        Description  = 'Multi-factor authentication; Security configuration standards'
+        Description = 'Multi-factor authentication; Security configuration standards'
     }
-    'RiskySignIn_NoPolicy'              = @{
+    'RiskySignIn_NoPolicy' = @{
         Requirements = @('10.4.1', '11.5.1')
-        Description  = 'Audit logs reviewed; Security monitoring implemented'
+        Description = 'Audit logs reviewed; Security monitoring implemented'
     }
-    'PasswordExpiry_Disabled'           = @{
+    'PasswordExpiry_Disabled' = @{
         Requirements = @('8.3.6', '8.3.9')
-        Description  = 'Password parameters configured; Passwords changed upon suspicion of compromise'
+        Description = 'Password parameters configured; Passwords changed upon suspicion of compromise'
     }
     'SelfServicePasswordReset_Disabled' = @{
         Requirements = @('8.6.1', '8.6.2')
-        Description  = 'Password reset process secure; Identity verified before password reset'
+        Description = 'Password reset process secure; Identity verified before password reset'
     }
 }
 
@@ -342,6 +342,7 @@ function Get-ComplianceMapping {
         Get-ComplianceMapping -FindingType "MFA_Disabled" -Framework "CIS"
         Returns only CIS framework mapping
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -395,6 +396,7 @@ function Get-AllComplianceMappings {
         Get-AllComplianceMappings
         Returns all framework mappings
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [ValidateSet('CIS', 'NIST', 'SOC2', 'PCIDSS', 'All')]
@@ -479,7 +481,7 @@ function Get-FindingsForControl {
         if ($controls -contains $ControlId) {
             $findings += @{
                 FindingType = $findingType
-                Mapping     = $mappingTable[$findingType]
+                Mapping = $mappingTable[$findingType]
             }
         }
     }
@@ -505,6 +507,7 @@ function Format-ComplianceReference {
         Format-ComplianceReference -FindingType "MFA_Disabled" -Format "Short"
         Returns: "CIS M365: 1.1.3, 1.3.1 | NIST CSF: PR.AC-1, PR.AC-7 | SOC2: CC6.1, CC6.2 | PCI-DSS: 8.4.2, 8.5.1"
     #>
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -620,6 +623,7 @@ function Get-ComplianceGapReport {
     .EXAMPLE
         Get-ComplianceGapReport -Findings $allFindings -Framework "CIS"
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -630,9 +634,9 @@ function Get-ComplianceGapReport {
     )
 
     $gapReport = @{
-        TotalFindings  = $Findings.Count
+        TotalFindings = $Findings.Count
         FailedFindings = @($Findings | Where-Object { $_.Status -eq 'FAIL' -or $_.Status -eq 'WARNING' }).Count
-        FrameworkGaps  = @{}
+        FrameworkGaps = @{}
     }
 
     # Analyze by framework
@@ -678,7 +682,7 @@ function Get-ComplianceGapReport {
 
         $gapReport.FrameworkGaps[$fw] = @{
             ControlsAffected = $controlsAffected.Count
-            Controls         = $controlsAffected
+            Controls = $controlsAffected
         }
     }
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Invoke-CodeQualityCheck.ps1
     Runs PSScriptAnalyzer against the EntraChecks codebase
@@ -65,7 +65,7 @@ param(
     [Parameter()]
     [string]$Path,
 
-    [switch]$Recurse = $true,
+    [switch]$Recurse,
 
     [Parameter()]
     [ValidateSet('Error', 'Warning', 'Information')]
@@ -87,15 +87,21 @@ param(
     [string]$SettingsPath
 )
 
-# Set default path if not provided
+# Default to recursive scan
+if (-not $PSBoundParameters.ContainsKey('Recurse')) {
+    $Recurse = [switch]::new($true)
+}
+
+# Set default path to project root (parent of Scripts/)
 if (-not $Path) {
-    $Path = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+    $projectRoot = if ($PSScriptRoot) { Split-Path $PSScriptRoot -Parent } else { Get-Location }
+    $Path = $projectRoot
 }
 
 # Set default settings path if not provided
 if (-not $SettingsPath) {
-    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
-    $SettingsPath = Join-Path $scriptDir "PSScriptAnalyzerSettings.psd1"
+    $projectRoot = if ($PSScriptRoot) { Split-Path $PSScriptRoot -Parent } else { Get-Location }
+    $SettingsPath = Join-Path $projectRoot "PSScriptAnalyzerSettings.psd1"
 }
 
 #region ==================== INITIALIZATION ====================

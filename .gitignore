@@ -1,13 +1,35 @@
 # EntraChecks output (don't commit assessment results)
+Reports/
 Output/
 Snapshots/
+Logs/
+
+# Internal development notes (not public)
+DevNotes/
+
+# Claude Code project context
 .claude/*
 
+# Generated remediation scripts
+RemediationScripts-*/
 
 # PowerShell logs
 *.log
 *.transcript
 
+# Generated reports
+*.xlsx
+*.csv
+Assessment-Data-*.json
+Snapshot-*.json
+DeltaReport-*.html
+Comprehensive-Assessment-*.html
+
 # Temp files
 *.tmp
 ~$*
+
+# Sensitive data
+*credentials*
+*secrets*
+*.env

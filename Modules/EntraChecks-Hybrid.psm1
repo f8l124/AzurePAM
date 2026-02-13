@@ -61,6 +61,7 @@ $script:SyncDelayWarningHours = 1
     Called automatically when module is imported.
 #>
 function Initialize-HybridModule {
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param()
     
@@ -133,21 +134,21 @@ function Add-ModuleFinding {
     }
     else {
         $finding = [PSCustomObject]@{
-            Time        = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-            Status      = $Status
-            Object      = $Object
+            Time = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            Status = $Status
+            Object = $Object
             Description = $Description
             Remediation = $Remediation
-            Module      = $script:ModuleName
+            Module = $script:ModuleName
         }
         
         $script:Findings += $finding
         
         $color = switch ($Status) {
-            "OK"      { "Green" }
-            "INFO"    { "Cyan" }
+            "OK" { "Green" }
+            "INFO" { "Cyan" }
             "WARNING" { "Yellow" }
-            "FAIL"    { "Red" }
+            "FAIL" { "Red" }
         }
         Write-Host "[$Status] $Object" -ForegroundColor $color
     }
@@ -697,7 +698,7 @@ function Test-PassThroughAuthentication {
             }
         }
         catch {
-            # API may not be accessible - try alternative detection
+            Write-Verbose "Connect API not accessible, trying alternative detection: $_"
         }
         
         # Alternative: Check for Azure AD Connect service principals
@@ -898,19 +899,19 @@ function Test-OnPremisesProvisioningErrors {
                         $errorValue = if ($error.value) { $error.value } else { "" }
                         
                         if ($errorValue -match "PropertyConflict|duplicate|already exists") {
-                            $errorsByType["PropertyConflict"] += @{Object = $user.displayName; Error = $errorValue}
+                            $errorsByType["PropertyConflict"] += @{Object = $user.displayName; Error = $errorValue }
                         }
                         elseif ($errorValue -match "validation|invalid|format") {
-                            $errorsByType["DataValidationFailed"] += @{Object = $user.displayName; Error = $errorValue}
+                            $errorsByType["DataValidationFailed"] += @{Object = $user.displayName; Error = $errorValue }
                         }
                         elseif ($errorValue -match "federated|domain") {
-                            $errorsByType["FederatedDomainChangeError"] += @{Object = $user.displayName; Error = $errorValue}
+                            $errorsByType["FederatedDomainChangeError"] += @{Object = $user.displayName; Error = $errorValue }
                         }
                         elseif ($errorValue -match "large|size|limit") {
-                            $errorsByType["LargeObject"] += @{Object = $user.displayName; Error = $errorValue}
+                            $errorsByType["LargeObject"] += @{Object = $user.displayName; Error = $errorValue }
                         }
                         else {
-                            $errorsByType["Other"] += @{Object = $user.displayName; Error = $errorValue}
+                            $errorsByType["Other"] += @{Object = $user.displayName; Error = $errorValue }
                         }
                     }
                 }
@@ -1043,4 +1044,4 @@ Export-ModuleMember -Function @(
 #endregion
 
 # Auto-initialize when module is imported
-$moduleInfo = Initialize-HybridModule
+$null = Initialize-HybridModule

@@ -53,6 +53,7 @@ function New-EnhancedExcelReport {
     .EXAMPLE
         New-EnhancedExcelReport -Findings $findings -OutputPath "report.xlsx" -TenantInfo $tenantInfo
     #>
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -305,10 +306,10 @@ function New-CSVWorkbook {
     Write-Host "[INFO] ImportExcel module not available. Exporting to CSV files in: $csvDir" -ForegroundColor Yellow
 
     # Calculate summaries
-    $riskSummary = Get-RiskSummary -Findings $Findings
-    $complianceGap = Get-ComplianceGapReport -Findings $Findings -Framework 'All'
-    $quickWins = Get-QuickWins -Findings $Findings
-    $prioritized = Get-PrioritizedFindings -Findings $Findings
+    $null = Get-RiskSummary -Findings $Findings
+    $null = Get-ComplianceGapReport -Findings $Findings -Framework 'All'
+    $null = Get-QuickWins -Findings $Findings
+    $null = Get-PrioritizedFindings -Findings $Findings
 
     # 1-9. Export all sheets as CSV files
     # (Same content as Excel workbook, just to CSV)
