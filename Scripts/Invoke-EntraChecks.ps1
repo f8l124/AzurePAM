@@ -98,7 +98,7 @@
 
 .NOTES
     Version: 1.5.0
-    Author: SolveGRC Team
+    Author: David Stells
     Requires: Microsoft.Graph PowerShell SDK
     
     Required Graph Permissions (Read-Only):

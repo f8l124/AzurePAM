@@ -13,7 +13,7 @@
 
 .NOTES
     Version: 1.0.0
-    Author: SolveGRC Team
+    Author: David Stells
 #>
 
 #Requires -Version 5.1

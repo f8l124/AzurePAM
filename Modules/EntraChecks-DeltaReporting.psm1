@@ -16,7 +16,7 @@
     
 .NOTES
     Version: 1.0.0
-    Author: SolveGRC Team
+    Author: David Stells
     
 .LINK
     Main Script: Invoke-EntraChecks.ps1

@@ -54,7 +54,7 @@
 
 .NOTES
     Version: 2.0.0
-    Author: SolveGRC Team
+    Author: David Stells
     Requires: EntraChecks modules (ComplianceMapping, RiskScoring, HTMLReporting, DeltaReporting, ExcelReporting, RemediationGuidance)
 #>
 

@@ -8,7 +8,7 @@
 
 .NOTES
     Version: 1.0.0
-    Author: SolveGRC Team
+    Author: David Stells
     Requires: PowerShell 5.1 or higher
 #>
 

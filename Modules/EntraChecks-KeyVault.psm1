@@ -10,7 +10,7 @@
 
 .NOTES
     Version: 1.0.0
-    Author: SolveGRC Team
+    Author: David Stells
     Requires: Az.KeyVault module (optional)
 #>
 

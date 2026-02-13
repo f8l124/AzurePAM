@@ -13,7 +13,7 @@
     - PCI-DSS v4.0.1
 
 .NOTES
-    Author: EntraChecks Team
+    Author: David Stells
     Version: 1.0.0
 #>
 

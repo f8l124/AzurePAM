@@ -16,7 +16,7 @@
     - Rollback procedures
 
 .NOTES
-    Author: EntraChecks Team
+    Author: David Stells
     Version: 1.0.0
 #>
 

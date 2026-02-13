@@ -14,7 +14,7 @@
     - Remediation effort (time, complexity, risk)
 
 .NOTES
-    Author: EntraChecks Team
+    Author: David Stells
     Version: 1.0.0
 #>
 

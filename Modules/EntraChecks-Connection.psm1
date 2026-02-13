@@ -9,7 +9,7 @@ retry logic for transient failures, and throttling/rate limit handling.
 
 .NOTES
 Version: 1.0.0
-Author: SolveGRC Team
+Author: David Stells
 #>
 
 #Requires -Version 5.1

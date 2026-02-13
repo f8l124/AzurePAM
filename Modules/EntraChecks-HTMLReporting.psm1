@@ -15,7 +15,7 @@
     - Professional styling for IT leadership
 
 .NOTES
-    Author: EntraChecks Team
+    Author: David Stells
     Version: 1.0.0
 #>
 

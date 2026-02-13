@@ -16,7 +16,7 @@
     - Testing and verification steps
 
 .NOTES
-    Author: SolveGRC Team
+    Author: David Stells
     Version: 2.0.0
     Extends: EntraChecks-RemediationGuidance.psm1
 #>

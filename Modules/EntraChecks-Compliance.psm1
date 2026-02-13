@@ -17,7 +17,7 @@
     
 .NOTES
     Version: 1.0.0
-    Author: SolveGRC Team
+    Author: David Stells
     Requires: Findings from Invoke-EntraChecks.ps1 or modules
     
     No additional licenses required - uses existing findings.
