@@ -609,7 +609,7 @@ catch {
     .header { background: linear-gradient(135deg, #0078d4, #0053a6); color: white; padding: 30px 40px; }
     .header h1 { font-size: 1.8em; margin-bottom: 8px; }
     .header .meta { opacity: 0.9; font-size: 0.95em; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
     .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
     .card { background: white; border-radius: 8px; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     .card .number { font-size: 2.5em; font-weight: 700; }
@@ -626,9 +626,14 @@ catch {
     .section h2.high-header { border-left: 4px solid #ff8c00; }
     .section h2.medium-header { border-left: 4px solid #ffc107; }
     .section h2.low-header { border-left: 4px solid #107c10; }
-    table { width: 100%; border-collapse: collapse; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th { background: #f8f9fa; text-align: left; padding: 10px 16px; font-size: 0.8em; text-transform: uppercase; color: #666; }
-    td { padding: 12px 16px; border-top: 1px solid #eee; vertical-align: top; font-size: 0.9em; }
+    td { padding: 12px 16px; border-top: 1px solid #eee; vertical-align: top; font-size: 0.9em; word-wrap: break-word; overflow-wrap: break-word; }
+    th:nth-child(1) { width: 8%; }
+    th:nth-child(2) { width: 7%; }
+    th:nth-child(3) { width: 40%; }
+    th:nth-child(4) { width: 35%; }
+    th:nth-child(5) { width: 10%; }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600; color: white; }
     .badge.critical { background: #d13438; }
     .badge.high { background: #ff8c00; }

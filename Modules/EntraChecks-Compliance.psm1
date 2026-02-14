@@ -2242,7 +2242,7 @@ function Export-UnifiedComplianceReport {
             background: var(--gray-100);
         }
         
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
         
         header {
             background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
@@ -2355,10 +2355,16 @@ function Export-UnifiedComplianceReport {
         
         .card-body { padding: 20px; }
         
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--gray-200); }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--gray-200); word-wrap: break-word; overflow-wrap: break-word; }
         th { background: var(--gray-100); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
         tr:hover { background: var(--gray-100); }
+        .col-check { width: 14%; }
+        .col-status { width: 7%; }
+        .col-category { width: 9%; }
+        .col-object { width: 15%; }
+        .col-desc { width: 30%; }
+        .col-remediation { width: 25%; }
         
         .badge {
             display: inline-block;
@@ -2482,12 +2488,12 @@ function Export-UnifiedComplianceReport {
                 <table>
                     <thead>
                         <tr>
-                            <th>Check</th>
-                            <th>Status</th>
-                            <th>Category</th>
-                            <th>Object</th>
-                            <th>Description</th>
-                            <th>Remediation</th>
+                            <th class="col-check">Check</th>
+                            <th class="col-status">Status</th>
+                            <th class="col-category">Category</th>
+                            <th class="col-object">Object</th>
+                            <th class="col-desc">Description</th>
+                            <th class="col-remediation">Remediation</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2514,7 +2520,7 @@ function Export-UnifiedComplianceReport {
                             <td><strong>$fCheckName</strong></td>
                             <td>$fStatusBadge</td>
                             <td>$fCategory</td>
-                            <td style="max-width:200px;word-wrap:break-word;">$fObj</td>
+                            <td>$fObj</td>
                             <td>$fDesc</td>
                             <td style="font-size:0.85rem;">$fRem</td>
                         </tr>
